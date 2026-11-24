@@ -1,0 +1,2344 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>Cardápio</title>
+  <!-- versões fixas das bibliotecas -->
+  <script src="https://cdn.tailwindcss.com/3.4.17"></script>
+  <script>
+    /* CORES DA LOJA: vêm do painel (Configurações > Identidade da loja).
+       A paleta "purple" do Tailwind passa a seguir a cor principal escolhida. */
+    window.tailwind = window.tailwind || {};
+    tailwind.config = { theme: { extend: { colors: { purple: (function () {
+      var p = {}; [50,100,200,300,400,500,600,700,800,900,950].forEach(function (n) { p[n] = 'rgb(var(--p' + n + ') / <alpha-value>)'; }); return p;
+    })() } } } };
+  </script>
+  <script>
+    /* Paleta gerada a partir da cor principal (mesma função no painel) */
+    function corHexParaRgb(h) { h = String(h || '').replace('#', ''); if (h.length === 3) h = h.replace(/./g, '$&$&'); var n = parseInt(h, 16); if (!/^[0-9a-fA-F]{6}$/.test(h)) return null; return [n >> 16 & 255, n >> 8 & 255, n & 255]; }
+    function corMisturar(c, alvo, t) { return c.map(function (v, i) { return Math.round(v + (alvo[i] - v) * t); }); }
+    function corLuminancia(c) { var a = c.map(function (v) { v /= 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); }); return 0.2126 * a[0] + 0.7152 * a[1] + 0.0722 * a[2]; }
+    function aplicarCoresLoja(primaria, destaque) {
+      var c = corHexParaRgb(primaria) || [185, 28, 28];
+      var tentativas = 0; // garante texto branco legível sobre a cor principal
+      while ((1.05 / (corLuminancia(c) + 0.05)) < 4.2 && tentativas++ < 12) c = corMisturar(c, [0, 0, 0], 0.12);
+      var d = corHexParaRgb(destaque) || [251, 191, 36];
+      var B = [255, 255, 255], P = [0, 0, 0], r = document.documentElement.style;
+      var tons = { 50: corMisturar(c, B, 0.94), 100: corMisturar(c, B, 0.87), 200: corMisturar(c, B, 0.74), 300: corMisturar(c, B, 0.55), 400: corMisturar(c, B, 0.32),
+        500: corMisturar(c, B, 0.14), 600: c, 700: corMisturar(c, P, 0.12), 800: corMisturar(c, P, 0.25), 900: corMisturar(c, P, 0.38), 950: corMisturar(c, P, 0.55) };
+      Object.keys(tons).forEach(function (k) { r.setProperty('--p' + k, tons[k].join(' ')); });
+      var hex = function (x) { return '#' + x.map(function (v) { return ('0' + v.toString(16)).slice(-2); }).join(''); };
+      r.setProperty('--cor', hex(c)); r.setProperty('--cor-escura', hex(tons[900])); r.setProperty('--cor-clara', hex(tons[100]));
+      r.setProperty('--fundo', hex(corMisturar(c, B, 0.975))); r.setProperty('--destaque', hex(d));
+      r.setProperty('--destaque-texto', corLuminancia(d) > 0.45 ? '#1f1300' : '#ffffff');
+      var meta = document.querySelector('meta[name="theme-color"]'); if (meta) meta.setAttribute('content', hex(c));
+    }
+    // aplica já as cores da última visita (evita "piscar" a cor padrão)
+    (function () { var m = {}; try { m = JSON.parse(localStorage.getItem('loja_marca') || '{}'); } catch (e) {} aplicarCoresLoja(m.cor_primaria, m.cor_destaque); })();
+  </script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <!-- Endereço e chave do Supabase deste cliente: edite SÓ o arquivo config.js -->
+  <script src="config.js"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <style>
+
+    .hide-scrollbar::-webkit-scrollbar { display: none; }
+    .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+  </style>
+  <!-- Configurações de PWA -->
+  <link rel="manifest" href="manifest-site.json">
+  <meta name="theme-color" content="var(--cor)">
+  <link rel="apple-touch-icon" href="icone-192.png">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+</head>
+<body class="bg-[var(--fundo)] text-gray-800 pb-28 antialiased">
+
+  <!-- Topo -->
+  <header class="bg-[var(--cor)] text-white p-4 shadow-md sticky top-0 z-30">
+    <div class="max-w-xl mx-auto flex items-center gap-3">
+      <!-- LOGOTIPO: enviado pelo painel (Configurações > Identidade da loja) -->
+      <div id="caixa-logo-topo" class="hidden w-16 h-16 rounded-2xl bg-white/10 items-center justify-center overflow-hidden flex-shrink-0">
+        <img id="img-logo-topo" alt="" class="w-full h-full object-contain" onerror="document.getElementById('caixa-logo-topo').classList.add('hidden');">
+      </div>
+      <div class="min-w-0">
+        <h1 id="nome-loja-topo" class="text-lg font-black leading-tight truncate">&nbsp;</h1>
+        <!-- Indicador Dinâmico de Loja Aberta/Fechada -->
+        <div id="indicador-status-loja" class="text-xs text-white/80 flex items-center gap-1.5 font-medium">
+          <span class="w-2 h-2 rounded-full bg-green-400 inline-block animate-pulse"></span> Aberto para Pedidos
+        </div>
+        <!-- Saudação no celular (abaixo do status) -->
+        <button type="button" onclick="abrirPainelConta()" class="saudacao-topo sm:hidden block text-left text-[13px] font-bold text-white mt-0.5 truncate max-w-[190px] cursor-pointer"></button>
+      </div>
+      <!-- Saudação no computador (à direita) -->
+      <button type="button" onclick="abrirPainelConta()" class="saudacao-topo hidden sm:block ml-auto text-[15px] font-bold text-white truncate max-w-[220px] cursor-pointer"></button>
+      <!-- Botão de menu (três traços) -->
+      <button onclick="abrirPainelConta()" class="ml-auto sm:ml-0 relative w-12 h-12 flex-shrink-0 bg-white/10 hover:bg-white/20 border border-white/25 text-white rounded-2xl flex items-center justify-center transition active:scale-95 cursor-pointer" aria-label="Abrir menu">
+        <i class="fa-solid fa-bars text-xl"></i>
+        <span id="badge-meus-pedidos" class="hidden absolute -top-1.5 -right-1.5 bg-[var(--destaque)] text-[var(--destaque-texto)] text-[10px] font-black w-5 h-5 rounded-full flex items-center justify-center shadow">0</span>
+      </button>
+    </div>
+  </header>
+
+  <!-- Filtro de Categorias -->
+  <nav class="max-w-xl mx-auto px-4 pt-4 pb-2 sticky top-[80px] bg-[var(--fundo)]/95 backdrop-blur-sm z-20">
+    <div class="flex gap-2 overflow-x-auto hide-scrollbar py-1" id="lista-categorias"></div>
+  </nav>
+
+  <!-- Lista de Itens -->
+  <main class="max-w-xl mx-auto p-4 space-y-3" id="lista-produtos"></main>
+
+  <!-- Acompanhamento rápido do pedido em andamento -->
+  <button id="barra-acompanhamento" onclick="abrirMeusPedidos()" class="hidden fixed left-0 right-0 z-30 cursor-pointer" style="bottom: 84px;">
+    <div class="max-w-xl mx-auto px-3">
+      <div class="bg-[var(--cor-escura)] text-white rounded-2xl shadow-2xl px-4 py-3 flex items-center gap-3 border border-purple-400/40">
+        <span id="barra-acomp-icone" class="w-9 h-9 rounded-full bg-[var(--destaque)] text-[var(--destaque-texto)] flex items-center justify-center text-base flex-shrink-0"><i class="fa-solid fa-clock"></i></span>
+        <span class="flex-1 text-left min-w-0">
+          <span id="barra-acomp-titulo" class="block text-[11px] text-purple-200 font-bold">Pedido #0</span>
+          <span id="barra-acomp-status" class="block text-sm font-extrabold truncate">Aguardando</span>
+        </span>
+        <span class="text-xs font-bold text-[var(--destaque)] whitespace-nowrap">Acompanhar <i class="fa-solid fa-chevron-right text-[10px]"></i></span>
+      </div>
+    </div>
+  </button>
+
+  <!-- MENU LATERAL: Minha conta -->
+  <div id="painel-conta" class="hidden fixed inset-0 z-[70]">
+    <div class="absolute inset-0 bg-black/50 backdrop-blur-[2px]" onclick="fecharPainelConta()"></div>
+    <aside class="absolute top-0 right-0 h-full w-[88%] max-w-sm bg-[var(--fundo)] shadow-2xl flex flex-col">
+      <div class="bg-[var(--cor)] text-white px-4 pt-5 pb-4 flex items-start gap-3">
+        <span class="w-11 h-11 rounded-full bg-white/15 flex items-center justify-center text-xl flex-shrink-0"><i class="fa-solid fa-circle-user"></i></span>
+        <div class="flex-1 min-w-0">
+          <p id="conta-titulo" class="font-extrabold text-base leading-tight truncate">Minha conta</p>
+          <p id="conta-subtitulo" class="text-[11px] text-purple-200 truncate">Entre para salvar seus dados</p>
+        </div>
+        <button onclick="fecharPainelConta()" class="w-8 h-8 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center cursor-pointer" aria-label="Fechar"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+
+      <div class="flex-1 overflow-y-auto p-4 space-y-3">
+        <!-- Não logado -->
+        <div id="conta-deslogado" class="space-y-3">
+          <!-- passo 1: identificar -->
+          <form id="conta-passo-id" onsubmit="contaContinuar(event)" class="bg-white rounded-2xl border border-purple-100 p-4 space-y-3 shadow-sm">
+            <p class="text-sm font-extrabold text-gray-900">Entrar ou criar conta</p>
+            <p class="text-[11px] text-gray-500">Seus dados ficam salvos para os próximos pedidos e você acompanha seu histórico em qualquer celular.</p>
+            <input id="conta-identificador" type="text" autocomplete="username" placeholder="Seu celular com DDD ou apelido" class="w-full border border-gray-300 rounded-xl p-3 text-sm outline-purple-600">
+            <button type="submit" class="w-full bg-[var(--cor)] hover:bg-purple-900 text-white font-bold py-3 rounded-xl text-sm cursor-pointer">Continuar</button>
+          </form>
+          <!-- passo 2: PIN -->
+          <form id="conta-passo-pin" onsubmit="contaEntrar(event)" class="hidden bg-white rounded-2xl border border-purple-100 p-4 space-y-3 shadow-sm">
+            <p class="text-sm font-extrabold text-gray-900" id="conta-saudacao-pin">Olá!</p>
+            <p class="text-[11px] text-gray-500">Digite o seu PIN de 4 números.</p>
+            <input id="conta-pin" type="password" inputmode="numeric" pattern="[0-9]*" maxlength="4" autocomplete="current-password" placeholder="••••" class="w-full border border-gray-300 rounded-xl p-3 text-center text-2xl tracking-[0.6em] font-black outline-purple-600">
+            <button type="submit" class="w-full bg-[var(--cor)] hover:bg-purple-900 text-white font-bold py-3 rounded-xl text-sm cursor-pointer">Entrar</button>
+            <div class="flex justify-between text-[11px] font-bold">
+              <button type="button" onclick="contaVoltarInicio()" class="text-gray-500 cursor-pointer">← Voltar</button>
+              <button type="button" onclick="contaEsqueciPin()" class="text-purple-700 cursor-pointer">Esqueci meu PIN</button>
+            </div>
+          </form>
+          <!-- passo 3: cadastro -->
+          <form id="conta-passo-cadastro" onsubmit="contaCriar(event)" class="hidden bg-white rounded-2xl border border-purple-100 p-4 space-y-2.5 shadow-sm">
+            <p class="text-sm font-extrabold text-gray-900">Criar minha conta</p>
+            <p class="text-[11px] text-gray-500">Leva 30 segundos. Na próxima vez, é só digitar seu celular e o PIN.</p>
+            <label class="block text-[11px] font-bold text-gray-600">Nome *<input id="cad-nome" type="text" autocomplete="name" class="mt-1 w-full border border-gray-300 rounded-xl p-2.5 text-sm font-normal outline-purple-600"></label>
+            <label class="block text-[11px] font-bold text-gray-600">Celular (WhatsApp) *<input id="cad-celular" type="tel" autocomplete="tel" placeholder="(16) 99999-9999" class="mt-1 w-full border border-gray-300 rounded-xl p-2.5 text-sm font-normal outline-purple-600"></label>
+            <label class="block text-[11px] font-bold text-gray-600">Apelido para entrar <span class="font-normal text-gray-400">(opcional)</span><input id="cad-apelido" type="text" autocapitalize="none" placeholder="ex: rafa.acai" class="mt-1 w-full border border-gray-300 rounded-xl p-2.5 text-sm font-normal outline-purple-600"></label>
+            <div class="grid grid-cols-2 gap-2">
+              <label class="block text-[11px] font-bold text-gray-600">Crie um PIN *<input id="cad-pin" type="password" inputmode="numeric" pattern="[0-9]*" maxlength="4" autocomplete="new-password" placeholder="4 números" class="mt-1 w-full border border-gray-300 rounded-xl p-2.5 text-center text-lg tracking-[0.4em] font-black outline-purple-600"></label>
+              <label class="block text-[11px] font-bold text-gray-600">Repita o PIN *<input id="cad-pin2" type="password" inputmode="numeric" pattern="[0-9]*" maxlength="4" autocomplete="new-password" placeholder="4 números" class="mt-1 w-full border border-gray-300 rounded-xl p-2.5 text-center text-lg tracking-[0.4em] font-black outline-purple-600"></label>
+            </div>
+            <p class="text-[10px] text-gray-400">Guarde seu PIN: ele protege seu endereço. Se esquecer, a loja redefine para você.</p>
+            <button type="submit" class="w-full bg-[var(--cor)] hover:bg-purple-900 text-white font-bold py-3 rounded-xl text-sm cursor-pointer">Criar conta</button>
+            <button type="button" onclick="contaVoltarInicio()" class="w-full text-[11px] font-bold text-gray-500 cursor-pointer">← Voltar</button>
+          </form>
+          <p id="conta-erro" class="hidden text-xs font-bold text-rose-700 bg-rose-50 border border-rose-200 rounded-xl p-3"></p>
+          <button onclick="abrirMeusPedidos()" class="w-full bg-white border border-gray-200 text-gray-700 hover:bg-gray-50 font-bold py-3 rounded-xl text-xs cursor-pointer"><i class="fa-solid fa-receipt mr-1.5"></i> Ver pedidos feitos neste aparelho</button>
+        </div>
+
+        <!-- Logado -->
+        <div id="conta-logado" class="hidden space-y-3">
+          <button onclick="abrirMeusPedidos()" class="w-full bg-white rounded-2xl border border-purple-100 p-4 flex items-center gap-3 shadow-sm hover:border-purple-300 cursor-pointer text-left">
+            <span class="w-10 h-10 rounded-xl bg-purple-100 text-[var(--cor)] flex items-center justify-center"><i class="fa-solid fa-receipt"></i></span>
+            <span class="flex-1"><span class="block text-sm font-extrabold text-gray-900">Meus pedidos</span><span id="conta-resumo-pedidos" class="block text-[11px] text-gray-500">Acompanhe e veja o histórico do mês</span></span>
+            <i class="fa-solid fa-chevron-right text-gray-300"></i>
+          </button>
+
+          <details id="conta-sec-dados" class="bg-white rounded-2xl border border-purple-100 shadow-sm group">
+            <summary class="p-4 flex items-center gap-3 cursor-pointer list-none">
+              <span class="w-10 h-10 rounded-xl bg-purple-100 text-[var(--cor)] flex items-center justify-center"><i class="fa-solid fa-id-card"></i></span>
+              <span class="flex-1"><span class="block text-sm font-extrabold text-gray-900">Meus dados</span><span class="block text-[11px] text-gray-500">Nome, celular e endereço de entrega</span></span>
+              <i class="fa-solid fa-chevron-down text-gray-300 group-open:rotate-180 transition"></i>
+            </summary>
+            <form onsubmit="contaSalvarDados(event)" class="px-4 pb-4 space-y-2.5">
+              <label class="block text-[11px] font-bold text-gray-600">Nome<input id="dados-nome" type="text" class="mt-1 w-full border border-gray-300 rounded-xl p-2.5 text-sm font-normal outline-purple-600"></label>
+              <div class="grid grid-cols-2 gap-2">
+                <label class="block text-[11px] font-bold text-gray-600">Celular<input id="dados-celular" type="tel" class="mt-1 w-full border border-gray-300 rounded-xl p-2.5 text-sm font-normal outline-purple-600"></label>
+                <label class="block text-[11px] font-bold text-gray-600">Apelido<input id="dados-apelido" type="text" autocapitalize="none" placeholder="opcional" class="mt-1 w-full border border-gray-300 rounded-xl p-2.5 text-sm font-normal outline-purple-600"></label>
+              </div>
+              <p class="text-[11px] font-extrabold text-[var(--cor)] pt-1">Endereço de entrega</p>
+              <label class="block text-[11px] font-bold text-gray-600">Rua<input id="dados-rua" type="text" class="mt-1 w-full border border-gray-300 rounded-xl p-2.5 text-sm font-normal outline-purple-600"></label>
+              <div class="grid grid-cols-3 gap-2">
+                <label class="block text-[11px] font-bold text-gray-600">Número<input id="dados-numero" type="text" class="mt-1 w-full border border-gray-300 rounded-xl p-2.5 text-sm font-normal outline-purple-600"></label>
+                <label class="col-span-2 block text-[11px] font-bold text-gray-600">Bairro<input id="dados-bairro" type="text" class="mt-1 w-full border border-gray-300 rounded-xl p-2.5 text-sm font-normal outline-purple-600"></label>
+              </div>
+              <label class="block text-[11px] font-bold text-gray-600">Complemento<input id="dados-comp" type="text" placeholder="Ex: Casa 2, Apto 31" class="mt-1 w-full border border-gray-300 rounded-xl p-2.5 text-sm font-normal outline-purple-600"></label>
+              <label class="block text-[11px] font-bold text-gray-600">Ponto de referência<input id="dados-referencia" type="text" placeholder="Ex: em frente à padaria" class="mt-1 w-full border border-gray-300 rounded-xl p-2.5 text-sm font-normal outline-purple-600"></label>
+              <button type="submit" id="btn-salvar-dados-conta" class="w-full bg-[var(--cor)] hover:bg-purple-900 text-white font-bold py-2.5 rounded-xl text-sm cursor-pointer">Salvar meus dados</button>
+            </form>
+          </details>
+
+          <details class="bg-white rounded-2xl border border-purple-100 shadow-sm group">
+            <summary class="p-4 flex items-center gap-3 cursor-pointer list-none">
+              <span class="w-10 h-10 rounded-xl bg-purple-100 text-[var(--cor)] flex items-center justify-center"><i class="fa-solid fa-key"></i></span>
+              <span class="flex-1"><span class="block text-sm font-extrabold text-gray-900">Trocar PIN</span><span class="block text-[11px] text-gray-500">Seu código de 4 números</span></span>
+              <i class="fa-solid fa-chevron-down text-gray-300 group-open:rotate-180 transition"></i>
+            </summary>
+            <form onsubmit="contaTrocarPin(event)" class="px-4 pb-4 space-y-2.5">
+              <div class="grid grid-cols-3 gap-2">
+                <label class="block text-[11px] font-bold text-gray-600">PIN atual<input id="pin-atual" type="password" inputmode="numeric" maxlength="4" class="mt-1 w-full border border-gray-300 rounded-xl p-2.5 text-center font-black outline-purple-600"></label>
+                <label class="block text-[11px] font-bold text-gray-600">Novo PIN<input id="pin-novo" type="password" inputmode="numeric" maxlength="4" class="mt-1 w-full border border-gray-300 rounded-xl p-2.5 text-center font-black outline-purple-600"></label>
+                <label class="block text-[11px] font-bold text-gray-600">Repita<input id="pin-novo2" type="password" inputmode="numeric" maxlength="4" class="mt-1 w-full border border-gray-300 rounded-xl p-2.5 text-center font-black outline-purple-600"></label>
+              </div>
+              <button type="submit" class="w-full bg-[var(--cor)] hover:bg-purple-900 text-white font-bold py-2.5 rounded-xl text-sm cursor-pointer">Trocar PIN</button>
+            </form>
+          </details>
+
+          <button onclick="contaSair()" class="w-full bg-white border border-rose-200 text-rose-600 hover:bg-rose-50 font-bold py-3 rounded-xl text-sm cursor-pointer"><i class="fa-solid fa-right-from-bracket mr-1.5"></i> Sair da conta</button>
+          <p class="text-[10px] text-gray-400 text-center">Ao sair, seus dados e pedidos continuam salvos na sua conta.</p>
+        </div>
+      </div>
+    </aside>
+  </div>
+
+  <!-- TELA: Meus pedidos -->
+  <div id="modal-meus-pedidos" class="hidden fixed inset-0 z-50 bg-[var(--fundo)] overflow-y-auto">
+    <div class="sticky top-0 bg-[var(--cor)] text-white z-10 shadow-md">
+      <div class="max-w-xl mx-auto px-4 py-3.5 flex items-center gap-3">
+        <button onclick="fecharMeusPedidos()" class="w-9 h-9 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center cursor-pointer" aria-label="Voltar"><i class="fa-solid fa-arrow-left"></i></button>
+        <div class="flex-1">
+          <h2 class="text-lg font-extrabold leading-tight">Meus pedidos</h2>
+          <p id="meus-pedidos-cliente" class="text-[11px] text-purple-200"></p>
+        </div>
+        <button onclick="atualizarMeusPedidos(true)" class="w-9 h-9 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center cursor-pointer" aria-label="Atualizar"><i id="icone-atualizar-meus" class="fa-solid fa-rotate-right"></i></button>
+      </div>
+    </div>
+    <div class="max-w-xl mx-auto p-4 space-y-4 pb-10">
+      <div id="lista-meus-pedidos" class="space-y-4"></div>
+      <div id="rodape-meus-pedidos" class="pt-4 border-t border-purple-100 text-center space-y-2"></div>
+    </div>
+  </div>
+
+  <!-- Barra Fixa Inferior -->
+  <footer class="fixed bottom-0 left-0 right-0 bg-white border-t border-purple-100 p-3.5 shadow-2xl z-30">
+    <div class="max-w-xl mx-auto flex items-center justify-between gap-3">
+      <div>
+        <p class="text-[11px] text-gray-500 uppercase font-semibold">Total do Pedido</p>
+        <p class="text-xl font-black text-[var(--cor)]" id="total-barra">R$ 0,00</p>
+      </div>
+      <button onclick="abrirModalCheckout()" id="btn-sacola" class="bg-[var(--cor)] hover:bg-purple-900 active:scale-95 text-white font-bold px-5 py-3 rounded-xl flex items-center gap-2.5 shadow-md transition disabled:opacity-40 disabled:pointer-events-none cursor-pointer">
+        <i class="fa-solid fa-bag-shopping"></i>
+        <span id="btn-sacola-texto">Ver Sacola (<span id="qtd-itens">0</span>)</span>
+        <span id="btn-sacola-fechada" style="display:none">Loja Fechada</span>
+      </button>
+    </div>
+  </footer>
+
+  <!-- MODAL: Montar o lanche -->
+  <div id="modal-produto" class="fixed inset-0 bg-black/60 hidden z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 backdrop-blur-sm">
+    <div class="bg-white w-full max-w-lg rounded-t-2xl sm:rounded-2xl max-h-[90vh] overflow-y-auto p-5 space-y-4">
+      <div class="flex justify-between items-start border-b pb-3 gap-3">
+        <img id="modal-prod-img" alt="" class="hidden w-16 h-16 rounded-xl object-cover flex-shrink-0">
+        <div class="flex-1">
+          <h2 class="text-lg font-black text-[var(--cor)]" id="modal-prod-nome">Lanche</h2>
+          <p class="text-xs text-gray-500 mt-0.5" id="modal-prod-desc">Descrição</p>
+        </div>
+        <button onclick="fecharModalProduto()" class="text-gray-400 hover:text-gray-700 text-2xl font-bold leading-none cursor-pointer" aria-label="Fechar">&times;</button>
+      </div>
+
+      <!-- Escolhas do combo, ponto da carne, retirar ingredientes e adicionais (montado pelo script) -->
+      <div id="modal-opcoes" class="space-y-4"></div>
+
+      <div>
+        <label class="block text-xs font-bold text-gray-700 mb-1">Alguma observação para este item?</label>
+        <input type="text" id="modal-prod-obs" class="w-full border border-gray-300 rounded-xl p-2.5 text-xs outline-purple-600" placeholder="Ex: bem tostado, molho à parte...">
+      </div>
+
+      <div class="pt-2 border-t flex items-center justify-between gap-4">
+        <div>
+          <p class="text-[11px] text-gray-500">Valor do Item</p>
+          <p class="text-lg font-black text-[var(--cor)]" id="modal-prod-total">R$ 0,00</p>
+        </div>
+        <button onclick="confirmarAdicionarItem()" class="flex-1 bg-[var(--cor)] hover:bg-purple-900 text-white font-bold py-3 px-4 rounded-xl shadow-md active:scale-95 transition text-sm cursor-pointer">
+          Adicionar ao Pedido
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL CHECKOUT MULTI-ETAPAS (Estilo App) -->
+  <div id="modal-checkout" class="fixed inset-0 bg-white sm:bg-black/60 hidden z-50 flex flex-col sm:items-center sm:justify-center sm:p-4 backdrop-blur-sm">
+    <div class="bg-white w-full max-w-lg h-full sm:h-auto sm:max-h-[92vh] sm:rounded-3xl flex flex-col overflow-hidden shadow-2xl">
+      
+      <!-- Cabeçalho com Seta Voltar -->
+      <div class="flex items-center justify-between px-4 py-3.5 border-b border-gray-100 bg-white sticky top-0 z-10">
+        <button type="button" onclick="voltarEtapaCheckout()" class="w-9 h-9 rounded-full bg-white border border-gray-200 shadow-sm flex items-center justify-center text-[var(--cor)] hover:bg-purple-50 transition cursor-pointer">
+          <i class="fa-solid fa-arrow-left text-sm"></i>
+        </button>
+        <h2 id="titulo-etapa-checkout" class="text-base font-extrabold text-gray-900">Sua Sacola</h2>
+       <button type="button" onclick="fecharModalCheckout()" class="w-9 h-9 rounded-full bg-gray-50 border border-gray-200 shadow-sm flex items-center justify-center text-gray-500 hover:text-red-600 hover:bg-red-50 transition cursor-pointer" title="Fechar">
+          <i class="fa-solid fa-xmark text-base"></i>
+        </button>
+      </div>
+
+      <!-- Corpo Rolável das Etapas -->
+      <div class="flex-1 overflow-y-auto p-4 space-y-5">
+
+        <!-- ETAPA 0: REVISÃO DA SACOLA -->
+        <div id="checkout-step-0" class="space-y-4">
+          <div id="itens-carrinho" class="divide-y divide-gray-100 text-sm"></div>
+
+          <div class="bg-purple-50/70 p-4 rounded-2xl space-y-2 text-sm border border-purple-100">
+            <div class="flex justify-between text-gray-600">
+              <span>Subtotal dos itens</span>
+              <span id="step0-subtotal" class="font-bold text-gray-800">R$ 0,00</span>
+            </div>
+            <p class="text-[11px] text-gray-500">A taxa de entrega será calculada na próxima etapa.</p>
+          </div>
+        </div>
+
+        <!-- ETAPA 1: ENTREGA E AGENDAMENTO -->
+        <div id="checkout-step-1" class="hidden space-y-5">
+          <!-- Quando deseja receber -->
+          <div>
+            <p class="text-xs font-bold text-gray-700 mb-2">Quando deseja receber seu pedido?</p>
+            <div class="space-y-2.5">
+              <div onclick="selecionarQuando('Padrão')" id="card-quando-padrão" class="p-3.5 rounded-2xl border-2 border-[var(--cor)] bg-purple-50/30 flex items-center justify-between cursor-pointer transition">
+                <div>
+                  <p class="text-sm font-extrabold text-gray-900">Padrão</p>
+                  <p id="texto-quando-padrao" class="text-xs text-gray-500">Entrega em 40 a 60 minutos</p>
+                </div>
+                <div id="radio-quando-padrão" class="w-5 h-5 rounded-full border-2 border-[var(--cor)] flex items-center justify-center">
+                  <div class="w-2.5 h-2.5 rounded-full bg-[var(--cor)]"></div>
+                </div>
+              </div>
+
+              <div onclick="selecionarQuando('Agendar')" id="card-quando-agendar" class="rounded-2xl border border-gray-200 bg-white overflow-hidden cursor-pointer transition">
+                <div class="p-3.5 flex items-center justify-between">
+                  <div>
+                    <p class="text-sm font-extrabold text-gray-900">Agendar</p>
+                    <p id="texto-horario-agendado" class="text-xs text-gray-500">Escolher horário para hoje</p>
+                  </div>
+                  <div id="radio-quando-agendar" class="w-5 h-5 rounded-full border-2 border-gray-300 flex items-center justify-center">
+                    <div class="w-2.5 h-2.5 rounded-full bg-transparent"></div>
+                  </div>
+                </div>
+                <div id="box-input-agendar" class="hidden bg-gray-100 p-3 border-t border-gray-200" onclick="event.stopPropagation()">
+                  <label class="block text-[11px] font-bold text-gray-600 mb-1">Escolha o horário desejado:</label>
+                  <input type="time" id="input-horario-agendamento" onchange="atualizarTextoAgendamento()" class="w-full bg-white border border-gray-300 rounded-xl p-2 text-xs font-bold outline-purple-600">
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Como deseja receber -->
+          <div>
+            <p class="text-xs font-bold text-gray-700 mb-2">Como deseja receber seu pedido?</p>
+            <div id="aviso-apenas-retirada" class="hidden mb-2.5 p-3 rounded-2xl bg-amber-50 border border-amber-300 text-amber-900 text-xs font-extrabold text-center">
+              <i class="fa-solid fa-store mr-1"></i> Apenas retirada, sem opção de entregas no momento
+            </div>
+            <div class="grid grid-cols-2 gap-3">
+              <button type="button" onclick="selecionarTipoRecebimento('Entrega')" id="btn-tipo-entrega" class="p-3.5 rounded-2xl border-2 border-[var(--cor)] bg-purple-50/30 flex flex-col items-center justify-center gap-1.5 text-[var(--cor)] transition cursor-pointer">
+                <i class="fa-solid fa-truck text-lg"></i>
+                <span class="text-xs font-extrabold">Entrega</span>
+              </button>
+              <button type="button" onclick="selecionarTipoRecebimento('Retirada')" id="btn-tipo-retirada" class="p-3.5 rounded-2xl border border-gray-200 bg-white flex flex-col items-center justify-center gap-1.5 text-gray-500 hover:bg-gray-50 transition cursor-pointer">
+                <i class="fa-solid fa-bag-shopping text-lg"></i>
+                <span class="text-xs font-extrabold">Retirada</span>
+              </button>
+            </div>
+          </div>
+
+          <p id="info-endereco-loja" class="hidden text-xs text-gray-600 bg-gray-50 border border-gray-200 rounded-xl p-3"><i class="fa-solid fa-location-dot text-[var(--cor)] mr-1"></i> <span></span></p>
+
+          <!-- Endereço de Entrega -->
+          <div id="secao-endereco-entrega" class="space-y-3">
+            <p class="text-xs font-bold text-gray-700">Selecione o endereço de entrega</p>
+            
+            <button type="button" onclick="abrirFormNovoEndereco()" class="w-full py-3 px-4 rounded-2xl border-2 border-[var(--cor)] text-[var(--cor)] font-extrabold text-xs flex items-center justify-center gap-2 hover:bg-purple-50 transition cursor-pointer">
+              <i class="fa-solid fa-location-dot"></i>
+              <span id="label-btn-endereco">Adicionar novo endereço</span>
+            </button>
+
+            <!-- Cartão do Endereço Salvo -->
+            <div id="card-endereco-salvo" class="hidden p-4 rounded-2xl border-2 border-[var(--cor)] bg-white flex items-start justify-between shadow-sm">
+              <div class="space-y-1 text-xs">
+                <p class="font-extrabold text-sm text-gray-900" id="end-salvo-apelido">Casa</p>
+                <p class="text-gray-700 font-medium" id="end-salvo-rua">Rua...</p>
+                <p class="text-gray-500" id="end-salvo-bairro">Bairro...</p>
+                <div class="pt-1.5 flex items-center gap-4 text-[11px] font-bold text-[var(--cor)]">
+                  <span><i class="fa-regular fa-clock mr-1"></i>40-60 min</span>
+                  <span><i class="fa-solid fa-truck mr-1"></i><span id="end-salvo-taxa">...</span></span>
+                </div>
+              </div>
+              <div class="flex flex-col items-center justify-between h-full gap-4">
+                <div class="w-5 h-5 rounded-full border-2 border-[var(--cor)] flex items-center justify-center">
+                  <div class="w-2.5 h-2.5 rounded-full bg-[var(--cor)]"></div>
+                </div>
+                <button type="button" onclick="abrirFormNovoEndereco()" class="text-gray-400 hover:text-[var(--cor)] p-1 cursor-pointer" title="Editar endereço">
+                  <i class="fa-solid fa-pen text-sm"></i>
+                </button>
+              </div>
+            </div>
+
+            <!-- Formulário Inline de Endereço -->
+            <div id="form-inline-endereco" class="hidden bg-gray-50 p-3.5 rounded-2xl border border-purple-200 space-y-2.5">
+              <div class="grid grid-cols-3 gap-2">
+                <div class="col-span-2">
+                  <label class="block text-[11px] font-bold text-gray-600 mb-1">Rua / Avenida *</label>
+                  <input type="text" id="input-end-rua" placeholder="digite o endereço" class="w-full bg-white border border-gray-300 rounded-xl p-2 text-xs outline-purple-600">
+                </div>
+                <div>
+                  <label class="block text-[11px] font-bold text-gray-600 mb-1">Número *</label>
+                  <input type="text" id="input-end-numero" placeholder="digite o numero" class="w-full bg-white border border-gray-300 rounded-xl p-2 text-xs outline-purple-600">
+                </div>
+              </div>
+              <div class="grid grid-cols-2 gap-2">
+                <div>
+                  <label class="block text-[11px] font-bold text-gray-600 mb-1">Bairro *</label>
+                  <input type="text" id="input-end-bairro" placeholder="digite o bairro" class="w-full bg-white border border-gray-300 rounded-xl p-2 text-xs outline-purple-600">
+                </div>
+                <div>
+                  <label class="block text-[11px] font-bold text-gray-600 mb-1">Complemento</label>
+                  <input type="text" id="input-end-comp" placeholder="Ex: Casa, Fundos..." class="w-full bg-white border border-gray-300 rounded-xl p-2 text-xs outline-purple-600">
+                </div>
+              </div>
+              <div>
+                <label class="block text-[11px] font-bold text-gray-600 mb-1">Ponto de referência</label>
+                <input type="text" id="input-end-ref" placeholder="Ex: em frente à padaria, portão azul" class="w-full bg-white border border-gray-300 rounded-xl p-2 text-xs outline-purple-600">
+              </div>
+              <button type="button" onclick="salvarEnderecoLocal()" class="w-full bg-[var(--cor)] text-white font-bold py-2 rounded-xl text-xs shadow cursor-pointer">
+                Confirmar Endereço
+              </button>
+            </div>
+          </div>
+
+          <!-- Dados do Cliente -->
+          <div class="space-y-2.5 pt-2 border-t border-gray-100">
+            <p class="text-xs font-bold text-gray-700">Seus dados para contato</p>
+            <button type="button" id="atalho-entrar-checkout" onclick="abrirPainelConta()" class="w-full text-left bg-purple-50 border border-purple-200 rounded-xl px-3 py-2 text-[11px] text-[var(--cor)] font-bold cursor-pointer"><i class="fa-solid fa-circle-user mr-1"></i> Já tem conta? <u>Entre</u> e seus dados são preenchidos sozinhos.</button>
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+              <div>
+                <label class="block text-[11px] font-bold text-gray-600 mb-1">Seu Nome *</label>
+                <input type="text" id="cliente-nome" placeholder="digite o nome " class="w-full border border-gray-300 rounded-xl p-2.5 text-xs outline-purple-600">
+              </div>
+              <div>
+                <label class="block text-[11px] font-bold text-gray-600 mb-1">Seu WhatsApp *</label>
+                <input type="tel" id="cliente-telefone" placeholder="digite o whatsapp " class="w-full border border-gray-300 rounded-xl p-2.5 text-xs outline-purple-600">
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ETAPA 2: FORMA DE PAGAMENTO -->
+        <div id="checkout-step-2" class="hidden space-y-5">
+          <!-- Pagar Online -->
+          <div>
+            <p class="text-xs font-extrabold text-[var(--cor)] flex items-center gap-2 mb-2.5">
+              <i class="fa-solid fa-mobile-screen-button"></i> Pagar online
+            </p>
+            <div onclick="selecionarPagamento('Pix', 'PIX (Online)')" id="pay-card-Pix" class="pay-option p-4 rounded-2xl border border-gray-200 bg-white flex items-center justify-between cursor-pointer transition">
+              <div class="flex items-center gap-3">
+                <i class="fa-brands fa-pix text-[var(--cor)] text-lg"></i>
+                <span class="text-sm font-bold text-gray-800">PIX</span>
+              </div>
+              <div class="pay-radio w-5 h-5 rounded-full border-2 border-gray-300 flex items-center justify-center">
+                <div class="w-2.5 h-2.5 rounded-full bg-transparent"></div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Pagar na Entrega / Retirada -->
+          <div>
+            <p class="text-xs font-extrabold text-[var(--cor)] flex items-center gap-2 mb-2.5">
+              <i class="fa-solid fa-house"></i> <span id="titulo-pagar-entrega">Pagar na entrega</span>
+            </p>
+            <div class="space-y-2.5">
+              <div onclick="selecionarPagamento('Dinheiro', 'Dinheiro')" id="pay-card-Dinheiro" class="pay-option p-4 rounded-2xl border border-gray-200 bg-white flex items-center justify-between cursor-pointer transition">
+                <div class="flex items-center gap-3">
+                  <i class="fa-solid fa-money-bill-wave text-gray-600 text-base"></i>
+                  <span class="text-sm font-bold text-gray-800">Dinheiro</span>
+                </div>
+                <div class="pay-radio w-5 h-5 rounded-full border-2 border-gray-300 flex items-center justify-center">
+                  <div class="w-2.5 h-2.5 rounded-full bg-transparent"></div>
+                </div>
+              </div>
+
+              <!-- Campo de Troco se escolher Dinheiro -->
+              <div id="box-troco-dinheiro" class="hidden bg-purple-50/60 p-3 rounded-2xl border border-purple-200">
+                <label class="block text-xs font-bold text-[var(--cor)] mb-1">Precisa de troco para quanto?</label>
+                <input type="text" id="input-troco-para" placeholder="Ex: Troco para R$ 50,00 (ou deixe vazio)" class="w-full bg-white border border-gray-300 rounded-xl p-2 text-xs outline-purple-600">
+              </div>
+
+              <div onclick="selecionarPagamento('Cartão de Crédito', 'Cartão de Crédito (Entrega)')" id="pay-card-CartaoCredito" class="pay-option p-4 rounded-2xl border border-gray-200 bg-white flex items-center justify-between cursor-pointer transition">
+                <div class="flex items-center gap-3">
+                  <i class="fa-regular fa-credit-card text-gray-600 text-base"></i>
+                  <span class="text-sm font-bold text-gray-800">Cartão de Crédito</span>
+                </div>
+                <div class="pay-radio w-5 h-5 rounded-full border-2 border-gray-300 flex items-center justify-center">
+                  <div class="w-2.5 h-2.5 rounded-full bg-transparent"></div>
+                </div>
+              </div>
+
+              <div onclick="selecionarPagamento('Cartão de Débito', 'Cartão de Débito (Entrega)')" id="pay-card-CartaoDebito" class="pay-option p-4 rounded-2xl border border-gray-200 bg-white flex items-center justify-between cursor-pointer transition">
+                <div class="flex items-center gap-3">
+                  <i class="fa-regular fa-credit-card text-gray-600 text-base"></i>
+                  <span class="text-sm font-bold text-gray-800">Cartão de Débito</span>
+                </div>
+                <div class="pay-radio w-5 h-5 rounded-full border-2 border-gray-300 flex items-center justify-center">
+                  <div class="w-2.5 h-2.5 rounded-full bg-transparent"></div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div>
+            <label class="block text-xs font-bold text-gray-700 mb-1">Observações Gerais (Opcional)</label>
+            <input type="text" id="cliente-obs" placeholder="Ex: Interfone quebrado, ligar ao chegar..." class="w-full border border-gray-300 rounded-xl p-2.5 text-xs outline-purple-600">
+          </div>
+        </div>
+
+        <!-- ETAPA 3: RESUMO DO PEDIDO -->
+        <div id="checkout-step-3" class="hidden space-y-4">
+          <div class="space-y-4 text-sm">
+            <div class="flex items-start gap-3">
+              <i class="fa-solid fa-truck text-gray-400 mt-1"></i>
+              <div>
+                <p class="text-xs text-gray-500 font-medium" id="resumo-final-tipo">Entrega</p>
+                <p class="font-extrabold text-gray-900 text-sm leading-snug" id="resumo-final-endereco">Endereço...</p>
+              </div>
+            </div>
+
+            <div class="flex items-start gap-3">
+              <i class="fa-regular fa-clock text-gray-400 mt-1"></i>
+              <div>
+                <p class="text-xs text-gray-500 font-medium" id="resumo-final-tempo-label">Tempo de entrega</p>
+                <p class="font-extrabold text-gray-900 text-sm" id="resumo-final-tempo">40-60 min</p>
+              </div>
+            </div>
+
+            <div class="flex items-start gap-3">
+              <i class="fa-solid fa-wallet text-gray-400 mt-1"></i>
+              <div>
+                <p class="text-xs text-gray-500 font-medium">Pagamento</p>
+                <p class="font-extrabold text-gray-900 text-sm" id="resumo-final-pagamento">PIX (Online)</p>
+              </div>
+            </div>
+
+            <div class="flex items-start gap-3">
+              <i class="fa-regular fa-user text-gray-400 mt-1"></i>
+              <div>
+                <p class="text-xs text-gray-500 font-medium">Suas informações</p>
+                <p class="font-extrabold text-gray-900 text-sm" id="resumo-final-cliente">Nome</p>
+                <p class="text-xs text-gray-600 font-semibold" id="resumo-final-telefone">(16) 99999-9999</p>
+              </div>
+            </div>
+          </div>
+
+          <!-- Bloco de Valores -->
+          <div class="border-t border-gray-200 pt-4 space-y-2 text-sm">
+            <p class="font-extrabold text-gray-800 text-xs uppercase tracking-wider">Resumo</p>
+            <div class="flex justify-between text-gray-600">
+              <span>Subtotal</span>
+              <span id="resumo-final-subtotal" class="font-semibold">R$ 0,00</span>
+            </div>
+            <div class="flex justify-between text-gray-600">
+              <span>Taxa de entrega</span>
+              <span id="resumo-final-taxa" class="font-semibold">R$ 0,00</span>
+            </div>
+            <div class="flex justify-between text-base font-black text-gray-900 pt-1">
+              <span>Total</span>
+              <span id="resumo-final-total" class="text-[var(--cor)]">R$ 0,00</span>
+            </div>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- Rodapé Fixo com Indicador de 4 Pontos e Botão Principal -->
+      <div class="p-4 bg-white border-t border-gray-100 space-y-3">
+        <!-- Stepper 4 Bolinhas -->
+        <div class="flex items-center justify-center gap-0">
+          <div id="dot-0" class="w-2.5 h-2.5 rounded-full bg-[var(--cor)] transition-all"></div>
+          <div id="line-1" class="w-6 h-0.5 bg-gray-200 transition-all"></div>
+          <div id="dot-1" class="w-2.5 h-2.5 rounded-full bg-gray-300 transition-all"></div>
+          <div id="line-2" class="w-6 h-0.5 bg-gray-200 transition-all"></div>
+          <div id="dot-2" class="w-2.5 h-2.5 rounded-full bg-gray-300 transition-all"></div>
+          <div id="line-3" class="w-6 h-0.5 bg-gray-200 transition-all"></div>
+          <div id="dot-3" class="w-2.5 h-2.5 rounded-full bg-gray-300 transition-all"></div>
+        </div>
+
+        <button type="button" id="btn-acao-checkout" onclick="avancarEtapaCheckout()" class="w-full bg-[var(--cor)] hover:bg-purple-900 text-white font-extrabold py-3.5 rounded-2xl shadow-lg transition active:scale-95 text-sm cursor-pointer">
+          Continuar
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: Aguardando Aceite da Loja -->
+  <div id="modalAguardandoAceite" class="modal-overlay" style="display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.85); z-index: 9999; align-items: center; justify-content: center; padding: 16px;">
+    <div style="background: #ffffff; color: #1e1e1e; max-width: 400px; width: 100%; border-radius: 20px; padding: 24px; text-align: center; box-shadow: 0 10px 25px rgba(0,0,0,0.3); font-family: sans-serif;">
+      <div class="spinner" style="border: 4px solid #f3f3f3; border-top: 4px solid var(--cor); border-radius: 50%; width: 50px; height: 50px; animation: spin 1s linear infinite; margin: 0 auto 16px auto;"></div>
+      <span id="pedidoNumeroBadge" style="background: var(--cor-clara); color: var(--cor); font-size: 13px; font-weight: 800; padding: 4px 12px; border-radius: 12px; display: inline-block; margin-bottom: 8px;">PEDIDO #...</span>
+      <h3 style="color: var(--cor); font-size: 19px; font-weight: 800; margin-bottom: 8px;">Aguardando a Loja Aceitar...</h3>
+      <p style="font-size: 13px; color: #555; line-height: 1.5; margin-bottom: 16px;">
+        Estamos confirmando a disponibilidade do seu pedido na nossa cozinha. Fique nesta tela!
+      </p>
+      <div style="background: #fcf4e8; border: 1px solid #f7dfbe; border-radius: 10px; padding: 10px; font-size: 12px; color: #9c6500;">
+        ⏳ Geralmente respondemos em menos de 2 minutos.
+      </div>
+      <button onclick="cancelarEsperaAceite()" style="margin-top: 16px; background: transparent; border: none; color: #888; font-size: 12px; text-decoration: underline; cursor: pointer;">
+        Cancelar pedido
+      </button>
+    </div>
+  </div>
+  
+  <!-- Modal Pix com QR Code, Cronômetro e Copia e Cola (Estilo App) -->
+  <div id="modalPix" class="modal-overlay" style="display: none; position: fixed; inset: 0; background: #ffffff; z-index: 9999; flex-direction: column; overflow-y: auto; font-family: sans-serif;">
+    <div style="max-width: 480px; width: 100%; margin: 0 auto; padding: 16px; flex: 1; display: flex; flex-direction: column;">
+      
+      <!-- Topo do Pix -->
+      <div style="display: flex; align-items: center; justify-content: space-between; padding-bottom: 12px; border-bottom: 1px solid #f0f0f0;">
+        <button onclick="cancelarModalPix()" style="width: 36px; height: 36px; border-radius: 50%; background: #fff; border: 1px solid #e5e7eb; display: flex; align-items: center; justify-content: center; cursor: pointer; color: var(--cor);">
+          <i class="fa-solid fa-arrow-left"></i>
+        </button>
+        <span style="font-weight: 800; font-size: 16px; color: #111;">Pagamento PIX</span>
+        <div style="width: 36px;"></div>
+      </div>
+
+      <!-- Carregando -->
+      <div id="pixCarregando" style="padding: 60px 0; text-align: center;">
+        <div class="spinner" style="border: 4px solid #f3f3f3; border-top: 4px solid var(--cor); border-radius: 50%; width: 44px; height: 44px; animation: spin 1s linear infinite; margin: 0 auto 16px auto;"></div>
+        <h3 style="margin: 0; color: var(--cor); font-weight: bold;">Gerando o seu Pix...</h3>
+        <p style="color: #666; font-size: 14px; margin-top: 4px;">Aguarde alguns segundos.</p>
+      </div>
+
+      <!-- Conteúdo QR Code -->
+      <div id="pixConteudo" style="display: none; text-align: center; padding-top: 20px; flex: 1; flex-direction: column; justify-content: space-between;">
+        <div>
+          <h3 style="margin: 0 0 8px 0; color: #111827; font-size: 19px; font-weight: 800;">Pague o PIX para enviar seu pedido</h3>
+          <span style="background: #fef08a; color: #854d0e; font-size: 12px; font-weight: 700; padding: 4px 14px; border-radius: 20px; display: inline-block; margin-bottom: 16px;">
+            Aguardando pagamento
+          </span>
+
+          <div style="background: #fff; padding: 12px; border-radius: 16px; display: inline-block; border: 1px solid #e5e7eb; margin-bottom: 16px;">
+            <img id="pixQrImg" src="" alt="QR Code Pix" style="width: 210px; height: 210px; display: block; margin: 0 auto;">
+          </div>
+
+          <!-- Cronômetro -->
+          <div style="margin-bottom: 16px;">
+            <p style="font-size: 12px; color: #6b7280; margin: 0;">Expira em</p>
+            <p id="pixTimerTexto" style="font-size: 22px; font-weight: 900; color: #111827; margin: 2px 0 8px 0;">29 : 59</p>
+            <div style="width: 220px; height: 4px; background: #e5e7eb; border-radius: 4px; margin: 0 auto; overflow: hidden;">
+              <div id="pixTimerBarra" style="width: 100%; height: 100%; background: var(--cor); transition: width 1s linear;"></div>
+            </div>
+          </div>
+
+          <!-- Copia e Cola -->
+          <div style="text-align: left; margin-top: 16px;">
+            <p style="font-size: 13px; font-weight: 700; color: #1f2937; margin: 0 0 2px 0;">
+              <i class="fa-solid fa-qrcode mr-1 text-[var(--cor)]"></i> Clique no código abaixo para copiar
+            </p>
+            <p style="font-size: 11px; color: #6b7280; margin: 0 0 8px 0;">Pague antes do tempo acabar.</p>
+            <p id="pixAvisoExtra" style="display:none; font-size: 12px; color: #78350f; background:#fef3c7; border:1px solid var(--destaque); border-radius:10px; padding:8px 10px; margin: 0 0 8px 0;"></p>
+            
+            <div onclick="copiarPixPayload()" style="background: #f3f4f6; border: 1px solid #e5e7eb; border-radius: 12px; padding: 12px; font-family: monospace; font-size: 11px; color: #374151; word-break: break-all; cursor: pointer; max-height: 85px; overflow-y: auto;" id="pixCodigoBox">
+              Carregando código...
+            </div>
+            <input type="hidden" id="pixCodigoCopia">
+          </div>
+        </div>
+
+        <div style="padding-top: 20px; padding-bottom: 8px;">
+          <button id="btnCopiarPix" onclick="copiarPixPayload()" style="width: 100%; padding: 15px; background: var(--cor); color: #fff; font-weight: 800; font-size: 15px; border: none; border-radius: 14px; cursor: pointer; box-shadow: 0 4px 12px rgba(65, 21, 100, 0.25);">
+            Copiar código
+          </button>
+        </div>
+      </div>
+
+      <!-- Confirmado -->
+      <div id="pixConfirmado" style="display: none; padding: 40px 0; text-align: center;">
+        <div style="font-size: 54px; color: #16a34a; margin-bottom: 12px;">✅</div>
+        <h3 style="color: #16a34a; margin: 0 0 8px 0; font-weight: 800; font-size: 20px;">Pagamento Confirmado!</h3>
+        <p style="color: #555; font-size: 14px; margin: 0 0 24px 0;">O seu pedido já seguiu para a cozinha e está em preparo.</p>
+        <button onclick="concluirFluxoPix()" style="width: 100%; padding: 14px; background: #16a34a; color: #fff; font-weight: bold; border: none; border-radius: 12px; cursor: pointer;">
+          <i class="fa-solid fa-location-arrow"></i> Acompanhar meu pedido
+        </button>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- Rodapé / Assinatura do Desenvolvedor Interativo -->
+  <footer class="bg-white text-gray-700 py-3 px-4 mt-6 border-t border-gray-200 text-center shadow-inner relative z-10">
+    <div class="max-w-md mx-auto flex flex-col items-center relative">
+      
+      <!-- Contêiner do Logotipo Clicável -->
+      <div class="relative inline-block">
+        <img src="manhublogo.png" alt="Manhub Logo" class="h-12 w-auto object-contain cursor-pointer transition hover:scale-105" onclick="toggleMenuManhub()" onerror="this.style.display='none';">
+        
+        <!-- Aba Pop-up Atualizada: Fundo Preto, Texto Branco Bold, Redes na mesma linha e Fale Conosco ao Centro -->
+        <div id="popup-manhub" class="hidden absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-56 bg-black text-white rounded-2xl shadow-2xl border border-gray-800 p-3 text-center z-50 space-y-2.5 animate-in fade-in zoom-in-95 duration-150">
+          
+          <!-- Cabeçalho com Texto ao Meio -->
+          <div class="relative flex items-center justify-center border-b border-gray-800 pb-2">
+            <span class="text-[10px] font-extrabold tracking-widest text-white uppercase">FALE CONOSCO</span>
+            <span class="absolute right-0 text-gray-400 hover:text-white cursor-pointer text-xs px-1" onclick="toggleMenuManhub()">&times;</span>
+          </div>
+          
+          <!-- Links de WhatsApp e Instagram na Mesma Linha -->
+          <div class="flex items-center justify-around pt-1">
+            <!-- WhatsApp -->
+            <a href="https://wa.me/5516996276674?text=Olá!%20Vim%20pelo%20sistema%20de%20pedidos." target="_blank" class="flex items-center gap-1.5 text-white hover:text-emerald-400 text-xs font-bold transition">
+              <i class="fa-brands fa-whatsapp text-emerald-500 text-base"></i> WhatsApp
+            </a>
+            
+            <!-- Instagram -->
+            <a href="https://instagram.com/manhubsistemagestao" target="_blank" class="flex items-center gap-1.5 text-white hover:text-pink-400 text-xs font-bold transition">
+              <i class="fa-brands fa-instagram text-pink-500 text-base"></i> Instagram
+            </a>
+          </div>
+
+        </div>
+      </div>
+
+      <!-- Texto abaixo colado no logotipo (-mt-2 reduz o espaço) -->
+      <p class="text-[6px] tracking-widest font-extrabold text-gray-600 uppercase -mt-2">
+        DESENVOLVIDO POR MANHUB
+      </p>
+    </div>
+  </footer>
+
+  <script>
+    'use strict';
+    /* =================================================================
+     * SITE DE PEDIDOS — LANCHONETE (modelo MANHUB)
+     * Os preços e o total são recalculados pelo banco (função criar_pedido),
+     * então ninguém consegue alterar o valor do pedido pelo navegador.
+     * ================================================================= */
+    var CONFIG_SUPABASE = window.CONFIG_SUPABASE || {};
+    var SUPABASE_URL = String(CONFIG_SUPABASE.url || '').replace(/\/+$/, '');
+    var SUPABASE_KEY = String(CONFIG_SUPABASE.chave || '');
+    // config.js ainda com o texto de exemplo? então o site avisa em vez de tentar conectar
+    if (!/^https:\/\/[a-z0-9-]+\.supabase\.co$/i.test(SUPABASE_URL) || SUPABASE_KEY.length < 20 || SUPABASE_KEY.indexOf('COLOQUE') !== -1) { SUPABASE_URL = ''; SUPABASE_KEY = ''; }
+    var MENSAGEM_APENAS_RETIRADA = "Apenas retirada, sem opção de entregas no momento";
+    var STATUS_ACEITO = ['Em preparo', 'Aceito', 'Saiu para entrega', 'Concluído'];
+
+    // Valores usados só até a configuração da loja chegar do banco
+    var config = {
+      whatsapp: "",
+      nomeLoja: "",
+      taxaEntrega: 0,
+      lojaAberta: true,
+      entregasAtivas: true,
+      modoPix: "chave_direta",
+      chavePix: "",
+      nomePix: "",
+      cidadePix: "",
+      carregada: false
+    };
+
+    var client = null;
+    function initClient() {
+      if (!client && window.supabase && window.supabase.createClient && SUPABASE_URL && SUPABASE_KEY) {
+        client = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, { auth: { persistSession: false } });
+      }
+      return client;
+    }
+
+    /* ---------- utilidades ---------- */
+    function esc(v) {
+      return String(v === null || v === undefined ? '' : v).replace(/[&<>"'`]/g, function (c) {
+        return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;', '`': '&#96;' }[c];
+      });
+    }
+    function brl(v) { return 'R$ ' + (Number(v) || 0).toFixed(2).replace('.', ','); }
+    function somenteDigitos(v) { return String(v || '').replace(/\D/g, ''); }
+
+    function avisoRapido(msg) {
+      var el = document.createElement('div');
+      el.textContent = msg;
+      el.style.cssText = 'position:fixed;left:50%;bottom:96px;transform:translateX(-50%);background:var(--cor);color:#fff;font-weight:700;font-size:13px;padding:10px 16px;border-radius:12px;box-shadow:0 8px 20px rgba(0,0,0,.25);z-index:10000;max-width:90vw;text-align:center';
+      document.body.appendChild(el);
+      setTimeout(function () { el.remove(); }, 2200);
+    }
+
+    /* ---------- configuração da loja (painel admin) ---------- */
+    async function carregarConfiguracaoLoja() {
+      var sb = initClient();
+      if (!sb) return;
+      try {
+        var res = await sb.from('configuracoes_loja').select('*').eq('id', 1).maybeSingle();
+        if (res.error || !res.data) return;
+        var c = res.data;
+        if (c.whatsapp) config.whatsapp = somenteDigitos(c.whatsapp);
+        if (c.taxa_entrega !== null && c.taxa_entrega !== undefined) config.taxaEntrega = Number(c.taxa_entrega) || 0;
+        config.lojaAberta = c.loja_aberta !== false;
+        config.entregasAtivas = c.entregas_ativas !== false;
+        config.modoPix = 'chave_direta';
+        config.chavePix = c.chave_pix || '';
+        config.nomePix = c.nome_recebedor_pix || c.nome_loja || 'LOJA';
+        config.cidadePix = c.cidade_pix || 'BRASIL';
+        config.nomeLoja = c.nome_loja || '';
+        config.enderecoLoja = c.endereco_loja || '';
+        aplicarMarca(c);
+        config.carregada = true;
+        aplicarConfiguracaoNaTela();
+      } catch (e) {
+        console.warn('Erro ao carregar configuração da loja:', e);
+      }
+    }
+
+    /* nome, logo e cores da loja (painel > Configurações > Identidade da loja) */
+    function aplicarMarca(c) {
+      var marca = { nome_loja: c.nome_loja || '', slogan: c.slogan || '', logo_url: c.logo_url || '', cor_primaria: c.cor_primaria || '', cor_destaque: c.cor_destaque || '' };
+      try { localStorage.setItem('loja_marca', JSON.stringify(marca)); } catch (e) {}
+      mostrarMarca(marca);
+    }
+    function mostrarMarca(m) {
+      aplicarCoresLoja(m.cor_primaria, m.cor_destaque);
+      var nome = m.nome_loja || 'Cardápio';
+      document.title = nome + ' - Pedidos';
+      var h1 = document.getElementById('nome-loja-topo'); if (h1) h1.textContent = nome;
+      var caixa = document.getElementById('caixa-logo-topo'), img = document.getElementById('img-logo-topo');
+      if (caixa && img) {
+        if (m.logo_url) { img.src = m.logo_url; img.alt = nome; caixa.classList.remove('hidden'); caixa.classList.add('flex'); }
+        else { caixa.classList.add('hidden'); caixa.classList.remove('flex'); }
+      }
+      var pix = document.getElementById('pay-card-Pix');
+      if (pix) pix.parentElement.classList.toggle('hidden', config.carregada && !config.chavePix);
+    }
+    (function () { try { var m = JSON.parse(localStorage.getItem('loja_marca') || 'null'); if (m) document.addEventListener('DOMContentLoaded', function () { mostrarMarca(m); }); } catch (e) {} })();
+
+    function aplicarConfiguracaoNaTela() {
+      var indicador = document.getElementById('indicador-status-loja');
+      if (indicador) {
+        indicador.innerHTML = config.lojaAberta
+          ? '<span class="w-2 h-2 rounded-full bg-green-400 inline-block animate-pulse"></span> Aberto para Pedidos' + (config.entregasAtivas ? '' : ' · Só retirada')
+          : '<span class="w-2 h-2 rounded-full bg-red-500 inline-block"></span> Loja Fechada';
+      }
+      // taxa de entrega exibida no cartão de endereço
+      var taxaEl = document.getElementById('end-salvo-taxa');
+      if (taxaEl) taxaEl.textContent = config.taxaEntrega > 0 ? brl(config.taxaEntrega) : 'Grátis';
+
+      // entregas ligadas / desligadas
+      var aviso = document.getElementById('aviso-apenas-retirada');
+      var btnEnt = document.getElementById('btn-tipo-entrega');
+      if (aviso) aviso.classList.toggle('hidden', config.entregasAtivas);
+      if (btnEnt) {
+        btnEnt.disabled = !config.entregasAtivas;
+        btnEnt.style.opacity = config.entregasAtivas ? '' : '0.4';
+        btnEnt.style.cursor = config.entregasAtivas ? '' : 'not-allowed';
+        btnEnt.title = config.entregasAtivas ? '' : MENSAGEM_APENAS_RETIRADA;
+      }
+      if (!config.entregasAtivas && estadoCheckout.tipoRecebimento !== 'Retirada') selecionarTipoRecebimento('Retirada');
+      atualizarBarra();
+    }
+
+    /* ---------- categorias e produtos ---------- */
+    var categorias = ["Todos"];
+    var categoriaAtiva = "Todos";
+    var adicionaisDisponiveis = [];
+    var tiposPao = [];
+    var produtosPorId = {};
+    var PONTOS_CARNE = ['Mal passado', 'Ao ponto', 'Bem passado'];
+    var produtos = [];
+    var carrinho = [];
+    var proximoIdCarrinho = 1;
+    var produtoEmEdicao = null;
+    var textoPedidoWhatsApp = "";
+    var pedidoAtual = null; // { id, token, total, formaPagamento, nome }
+
+    var etapaAtualCheckout = 0;
+    var estadoCheckout = {
+      quando: "Padrão",
+      horarioAgendado: "",
+      tipoRecebimento: "Entrega",
+      enderecoSalvo: null,
+      pagamentoValor: "",
+      pagamentoLabel: ""
+    };
+
+    function carregarDadosSalvosCliente() {
+      var c = contaAtual();
+      if (c) {
+        if (!document.getElementById('cliente-nome').value) document.getElementById('cliente-nome').value = c.nome || '';
+        if (!document.getElementById('cliente-telefone').value) document.getElementById('cliente-telefone').value = formatarCelular(c.celular);
+        if (!estadoCheckout.enderecoSalvo && c.endereco && c.endereco.rua) {
+          estadoCheckout.enderecoSalvo = c.endereco;
+          exibirCartaoEnderecoSalvo();
+        }
+      }
+      var atalho = document.getElementById('atalho-entrar-checkout');
+      if (atalho) atalho.classList.toggle('hidden', !!c);
+      try {
+        var nomeSalvo = localStorage.getItem('loja_cli_nome');
+        var telSalvo = localStorage.getItem('loja_cli_tel');
+        var endJson = localStorage.getItem('loja_cli_end');
+        if (nomeSalvo && !document.getElementById('cliente-nome').value) document.getElementById('cliente-nome').value = nomeSalvo;
+        if (telSalvo && !document.getElementById('cliente-telefone').value) document.getElementById('cliente-telefone').value = telSalvo;
+        if (endJson && !estadoCheckout.enderecoSalvo) {
+          estadoCheckout.enderecoSalvo = JSON.parse(endJson);
+          exibirCartaoEnderecoSalvo();
+        }
+      } catch (e) {}
+    }
+
+    function renderizarCategorias() {
+      var container = document.getElementById('lista-categorias');
+      if (!container) return;
+      container.innerHTML = categorias.map(function (cat, idx) {
+        var ativo = categoriaAtiva.trim().toLowerCase() === cat.trim().toLowerCase();
+        var classeCor = ativo ? 'bg-[var(--cor)] text-white shadow-sm' : 'bg-white text-gray-600 border border-purple-100 hover:bg-purple-50';
+        return '<button onclick="selecionarCategoria(' + idx + ')" class="px-3.5 py-1.5 rounded-full text-xs font-bold whitespace-nowrap transition cursor-pointer ' + classeCor + '">' + esc(cat) + '</button>';
+      }).join('');
+    }
+
+    function selecionarCategoria(idx) {
+      categoriaAtiva = categorias[idx] || 'Todos';
+      renderizarCategorias();
+      carregarProdutos();
+    }
+
+    function carregarProdutos() {
+      var container = document.getElementById('lista-produtos');
+      if (!container) return;
+      var filtrados = produtos.filter(function (p) {
+        if (p.ativo === false) return false;
+        if (categoriaAtiva.trim().toLowerCase() === "todos") return true;
+        return (p.categoria || "").trim().toLowerCase() === categoriaAtiva.trim().toLowerCase();
+      });
+      if (filtrados.length === 0) {
+        container.innerHTML = '<p class="text-center py-8 text-gray-400 text-sm">Nenhum produto disponível no momento.</p>';
+        return;
+      }
+      container.innerHTML = filtrados.map(function (prod) {
+        var idx = produtos.indexOf(prod);
+        var imgHtml = prod.imagem
+          ? '<img src="' + esc(prod.imagem) + '" alt="' + esc(prod.nome) + '" loading="lazy" class="w-full h-full object-cover" onerror="this.remove();">'
+          : '<div class="w-full h-full flex items-center justify-center text-purple-300 text-2xl"><i class="fa-solid ' + iconeCategoria(prod.categoria) + '"></i></div>';
+        return '<div class="bg-white p-3.5 rounded-2xl shadow-sm border border-purple-100 flex gap-3.5 items-center cursor-pointer hover:border-purple-300 transition" onclick="iniciarAdicaoProduto(' + idx + ')">' +
+          '<div class="w-20 h-20 rounded-xl overflow-hidden bg-purple-50 flex-shrink-0 border border-purple-100">' + imgHtml + '</div>' +
+          '<div class="flex-1 min-w-0">' +
+            '<h3 class="font-bold text-gray-900 text-sm leading-snug">' + esc(prod.nome) + '</h3>' +
+            '<p class="text-xs text-gray-500 mt-0.5 line-clamp-2 leading-relaxed">' + esc(prod.desc) + '</p>' +
+            '<div class="flex items-center justify-between mt-2">' +
+              '<span class="font-black text-[var(--cor-escura)] text-sm">' + brl(prod.preco) + '</span>' +
+              '<button onclick="event.stopPropagation(); iniciarAdicaoProduto(' + idx + ')" class="bg-purple-50 hover:bg-purple-100 text-[var(--cor)] font-bold px-3 py-1.5 rounded-lg border border-purple-200 text-xs active:scale-95 transition">+ Adicionar</button>' +
+            '</div>' +
+          '</div>' +
+        '</div>';
+      }).join('');
+    }
+
+    function lojaFechadaAviso() {
+      if (config.lojaAberta) return false;
+      alert("A loja está fechada no momento. Volte mais tarde!");
+      return true;
+    }
+
+    function iconeCategoria(cat) {
+      var c = String(cat || '').toLowerCase();
+      if (/bebida|refri|suco|drink/.test(c)) return 'fa-glass-water';
+      if (/por[cç][aã]o|batata|frita/.test(c)) return 'fa-bowl-food';
+      if (/sobremesa|doce|a[cç]a[ií]/.test(c)) return 'fa-ice-cream';
+      if (/pizza/.test(c)) return 'fa-pizza-slice';
+      if (/hot ?dog|cachorro/.test(c)) return 'fa-hotdog';
+      return 'fa-burger';
+    }
+    function gruposValidos(prod) {
+      return (prod.combo || []).map(function (g) {
+        var opcoes = (g.opcoes || []).filter(function (o) { var p = produtosPorId[String(o.produto_id)]; return p && p.ativo; })
+          .map(function (o) { return { produto_id: Number(o.produto_id), nome: produtosPorId[String(o.produto_id)].nome, acrescimo: Math.max(0, Number(o.acrescimo) || 0) }; });
+        return { titulo: g.titulo || 'Escolha', opcoes: opcoes };
+      });
+    }
+    /* tipos de pão que o lanche aceita (o padrão primeiro) */
+    function paesDoProduto(prod) {
+      if (!prod.trocaPao || tiposPao.length < 2) return [];
+      var pad = tiposPao.find(function (t) { return t.id === prod.paoPadraoId; }) || tiposPao[0];
+      return [pad].concat(tiposPao.filter(function (t) { return t !== pad; })).map(function (t) {
+        return { id: t.id, nome: t.nome, padrao: t === pad, extra: t === pad ? 0 : Math.max(0, t.acrescimo - pad.acrescimo) };
+      });
+    }
+    function produtoTemOpcoes(prod) {
+      return (prod.combo || []).length > 0 || prod.perguntaPonto || (prod.ingredientes || []).length > 0 || paesDoProduto(prod).length > 1 ||
+        (prod.aceitaAdicionais && adicionaisDisponiveis.length > 0);
+    }
+
+    function iniciarAdicaoProduto(idx) {
+      var prod = produtos[idx];
+      if (!prod || lojaFechadaAviso()) return;
+      if (!produtoTemOpcoes(prod)) {
+        carrinho.push({ cartId: proximoIdCarrinho++, produtoId: prod.id, nome: prod.nome, precoBase: prod.preco, adicionais: [], sem: [], ponto: null, escolhas: [], pao: null, obs: "", precoTotal: prod.preco, qtd: 1 });
+        atualizarBarra();
+        avisoRapido('✓ ' + prod.nome + ' adicionado à sacola');
+        return;
+      }
+      abrirModalProduto(prod);
+    }
+
+    function blocoOpcoes(titulo, subtitulo, conteudo, obrigatorio) {
+      return '<div class="border border-purple-100 rounded-2xl overflow-hidden">' +
+        '<div class="flex items-center justify-between px-3.5 py-2.5 bg-purple-50/70">' +
+          '<div><p class="text-xs font-black text-[var(--cor)] uppercase tracking-wide">' + esc(titulo) + '</p>' +
+          (subtitulo ? '<p class="text-[11px] text-gray-500">' + esc(subtitulo) + '</p>' : '') + '</div>' +
+          (obrigatorio ? '<span class="text-[10px] font-black bg-gray-800 text-white px-2 py-0.5 rounded-full">OBRIGATÓRIO</span>' : '') +
+        '</div><div class="p-3 space-y-2">' + conteudo + '</div></div>';
+    }
+    function linhaOpcao(tipo, nome, valor, rotulo, extra, marcado) {
+      return '<label class="flex items-center justify-between gap-3 p-2.5 rounded-xl border border-gray-200 hover:border-purple-300 bg-white cursor-pointer text-sm has-[:checked]:border-[var(--cor)] has-[:checked]:bg-purple-50/60">' +
+        '<span class="flex items-center gap-2.5"><input type="' + tipo + '" name="' + esc(nome) + '" value="' + esc(valor) + '"' + (marcado ? ' checked' : '') + ' onchange="atualizarTotalModal()" class="w-4 h-4 accent-[var(--cor)]">' +
+        '<span class="font-medium text-gray-800">' + esc(rotulo) + '</span></span>' +
+        (extra ? '<span class="font-bold text-xs text-[var(--cor-escura)] whitespace-nowrap">' + extra + '</span>' : '') + '</label>';
+    }
+
+    function abrirModalProduto(prod) {
+      produtoEmEdicao = prod;
+      document.getElementById('modal-prod-nome').innerText = prod.nome;
+      document.getElementById('modal-prod-desc').innerText = prod.desc;
+      document.getElementById('modal-prod-obs').value = "";
+      var img = document.getElementById('modal-prod-img');
+      if (prod.imagem) { img.src = prod.imagem; img.classList.remove('hidden'); } else img.classList.add('hidden');
+
+      var html = '';
+      gruposValidos(prod).forEach(function (g, gi) {
+        html += blocoOpcoes(g.titulo, 'Escolha 1 opção', g.opcoes.map(function (o, oi) {
+          return linhaOpcao('radio', 'escolha-' + gi, o.produto_id, o.nome, o.acrescimo > 0 ? '+ ' + brl(o.acrescimo) : '', false);
+        }).join('') || '<p class="text-xs text-gray-400">Nenhuma opção disponível agora.</p>', true);
+      });
+      var paes = paesDoProduto(prod);
+      if (paes.length) {
+        html += blocoOpcoes('Pão', 'Quer trocar o pão?', paes.map(function (t) {
+          return linhaOpcao('radio', 'pao', t.id, t.nome + (t.padrao ? ' (normal)' : ''), t.extra > 0 ? '+ ' + brl(t.extra) : '', t.padrao);
+        }).join(''), false);
+      }
+      if (prod.perguntaPonto) {
+        html += blocoOpcoes('Ponto da carne', '', PONTOS_CARNE.map(function (p) {
+          return linhaOpcao('radio', 'ponto', p, p, '', p === 'Ao ponto');
+        }).join(''), false);
+      }
+      if ((prod.ingredientes || []).length) {
+        html += blocoOpcoes('Quer retirar algum ingrediente?', 'Marque o que você NÃO quer', '<div class="flex flex-wrap gap-2">' +
+          prod.ingredientes.map(function (ing) {
+            return '<label class="cursor-pointer"><input type="checkbox" name="sem" value="' + esc(ing) + '" class="peer sr-only">' +
+              '<span class="inline-block px-3 py-1.5 rounded-full border border-gray-300 text-xs font-bold text-gray-700 peer-checked:bg-rose-50 peer-checked:border-rose-400 peer-checked:text-rose-700 peer-checked:line-through">' + esc(ing) + '</span></label>';
+          }).join('') + '</div>', false);
+      }
+      if (prod.aceitaAdicionais && adicionaisDisponiveis.length) {
+        html += blocoOpcoes('Adicionais', 'Turbine seu lanche', adicionaisDisponiveis.map(function (a) {
+          return linhaOpcao('checkbox', 'adicional', a.id, a.nome, '+ ' + brl(a.preco), false);
+        }).join(''), false);
+      }
+      var box = document.getElementById('modal-opcoes');
+      box.innerHTML = html;
+      box.querySelectorAll('input[name="sem"]').forEach(function (el) { el.addEventListener('change', atualizarTotalModal); });
+      atualizarTotalModal();
+      document.getElementById('modal-produto').classList.remove('hidden');
+    }
+
+    function lerOpcoesModal() {
+      var prod = produtoEmEdicao, box = document.getElementById('modal-opcoes');
+      var r = { adicionais: [], sem: [], ponto: null, escolhas: [], pao: null, faltando: null, preco: prod.preco };
+      var paes = paesDoProduto(prod);
+      if (paes.length) {
+        var ep = box.querySelector('input[name="pao"]:checked');
+        var tp = paes.find(function (t) { return ep && t.id === ep.value; }) || paes[0];
+        r.pao = { id: tp.id, nome: tp.nome, trocado: !tp.padrao };
+        r.preco += tp.extra;
+      }
+      gruposValidos(prod).forEach(function (g, gi) {
+        var el = box.querySelector('input[name="escolha-' + gi + '"]:checked');
+        if (!el) { if (!r.faltando) r.faltando = g.titulo; return; }
+        var o = g.opcoes.find(function (x) { return String(x.produto_id) === el.value; });
+        r.escolhas.push({ grupo: g.titulo, produto_id: o.produto_id, nome: o.nome, acrescimo: o.acrescimo });
+        r.preco += o.acrescimo;
+      });
+      if (prod.perguntaPonto) { var p = box.querySelector('input[name="ponto"]:checked'); r.ponto = p ? p.value : 'Ao ponto'; }
+      box.querySelectorAll('input[name="sem"]:checked').forEach(function (el) { r.sem.push(el.value); });
+      box.querySelectorAll('input[name="adicional"]:checked').forEach(function (el) {
+        var a = adicionaisDisponiveis.find(function (x) { return x.id === el.value; });
+        if (a) { r.adicionais.push(a); r.preco += a.preco; }
+      });
+      return r;
+    }
+
+    function atualizarTotalModal() {
+      if (!produtoEmEdicao) return;
+      document.getElementById('modal-prod-total').innerText = brl(lerOpcoesModal().preco);
+    }
+
+    function fecharModalProduto() {
+      document.getElementById('modal-produto').classList.add('hidden');
+      produtoEmEdicao = null;
+    }
+
+    function confirmarAdicionarItem() {
+      if (!produtoEmEdicao || lojaFechadaAviso()) return;
+      var op = lerOpcoesModal();
+      if (op.faltando) { alert('Escolha uma opção em "' + op.faltando + '".'); return; }
+      carrinho.push({
+        cartId: proximoIdCarrinho++,
+        produtoId: produtoEmEdicao.id,
+        nome: produtoEmEdicao.nome,
+        precoBase: produtoEmEdicao.preco,
+        adicionais: op.adicionais, sem: op.sem, ponto: op.ponto, escolhas: op.escolhas, pao: op.pao,
+        obs: document.getElementById('modal-prod-obs').value.trim().slice(0, 200),
+        precoTotal: op.preco,
+        qtd: 1
+      });
+      var nome = produtoEmEdicao.nome;
+      fecharModalProduto();
+      atualizarBarra();
+      avisoRapido('✓ ' + nome + ' adicionado à sacola');
+    }
+
+    /* Detalhes de um item (serve para a sacola e para os pedidos já enviados) */
+    function detalhesItem(i) {
+      var nomes = function (l) { return (l || []).map(function (x) { return typeof x === 'string' ? x : (x.nome || ''); }).filter(Boolean); };
+      var linhas = [];
+      (i.escolhas || []).forEach(function (e) { var g = String(e.grupo || '').replace(/^escolha (a |o |as |os |sua |seu )?/i, ''); linhas.push((g ? g.charAt(0).toUpperCase() + g.slice(1) + ': ' : '') + e.nome); });
+      if (i.pao && i.pao.trocado) linhas.push('Pão: ' + i.pao.nome);
+      if (i.ponto) linhas.push('Ponto: ' + i.ponto);
+      if ((i.sem || []).length) linhas.push('Sem ' + i.sem.join(', sem ').toLowerCase());
+      var ad = nomes(i.adicionais); if (ad.length) linhas.push('+ ' + ad.join(', '));
+      var obs = i.obs || i.observacao; if (obs) linhas.push('Obs: ' + obs);
+      return linhas;
+    }
+
+    function alterarQtd(cartId, delta) {
+      var item = carrinho.find(function (i) { return i.cartId === cartId; });
+      if (!item) return;
+      item.qtd = Math.min(50, item.qtd + delta);
+      if (item.qtd <= 0) carrinho = carrinho.filter(function (i) { return i.cartId !== cartId; });
+      atualizarBarra();
+      renderizarItensSacola();
+      if (carrinho.length === 0) fecharModalCheckout();
+    }
+
+    function calcularTotais() {
+      var subtotal = 0, totalQtd = 0;
+      carrinho.forEach(function (item) { subtotal += item.precoTotal * item.qtd; totalQtd += item.qtd; });
+      var taxa = estadoCheckout.tipoRecebimento === 'Entrega' ? config.taxaEntrega : 0;
+      return { subtotal: subtotal, taxa: taxa, total: subtotal > 0 ? subtotal + taxa : 0, totalQtd: totalQtd };
+    }
+
+    function atualizarBarra() {
+      var totais = calcularTotais();
+      document.getElementById('total-barra').innerText = brl(totais.subtotal);
+      document.getElementById('qtd-itens').innerText = totais.totalQtd;
+      var btn = document.getElementById('btn-sacola');
+      var rotulo = document.getElementById('btn-sacola-texto');
+      if (!btn) return;
+      if (!config.lojaAberta) {
+        btn.disabled = true;
+        btn.classList.add('bg-gray-400');
+        btn.classList.remove('bg-[var(--cor)]', 'hover:bg-purple-900');
+        if (rotulo) rotulo.style.display = 'none';
+        document.getElementById('btn-sacola-fechada').style.display = 'inline';
+      } else {
+        btn.disabled = totais.totalQtd === 0;
+        btn.classList.remove('bg-gray-400');
+        btn.classList.add('bg-[var(--cor)]', 'hover:bg-purple-900');
+        if (rotulo) rotulo.style.display = 'inline';
+        document.getElementById('btn-sacola-fechada').style.display = 'none';
+      }
+    }
+
+    function renderizarItensSacola() {
+      var totais = calcularTotais();
+      var container = document.getElementById('itens-carrinho');
+      container.innerHTML = carrinho.map(function (item) {
+        var compl = detalhesItem(item).map(function (l) { return '<p class="text-[11px] ' + (/^Obs:/.test(l) ? 'text-gray-500 italic' : /^Sem /.test(l) ? 'text-rose-600 font-medium' : 'text-purple-700 font-medium') + ' leading-snug">' + esc(l) + '</p>'; }).join('');
+        var obs = '';
+        return '<div class="flex justify-between items-center py-3">' +
+          '<div class="pr-2 flex-1">' +
+            '<p class="font-bold text-gray-800 text-sm leading-tight">' + esc(item.nome) + '</p>' + compl + obs +
+            '<p class="text-xs font-bold text-[var(--cor)] mt-1">' + brl(item.precoTotal * item.qtd) + '</p>' +
+          '</div>' +
+          '<div class="flex items-center gap-2.5 bg-gray-100 rounded-xl px-2 py-1">' +
+            '<button type="button" onclick="alterarQtd(' + item.cartId + ', -1)" class="w-6 h-6 rounded-lg bg-white shadow-sm font-bold text-[var(--cor)] text-sm flex items-center justify-center cursor-pointer">-</button>' +
+            '<span class="font-extrabold text-sm w-4 text-center">' + item.qtd + '</span>' +
+            '<button type="button" onclick="alterarQtd(' + item.cartId + ', 1)" class="w-6 h-6 rounded-lg bg-white shadow-sm font-bold text-[var(--cor)] text-sm flex items-center justify-center cursor-pointer">+</button>' +
+          '</div>' +
+        '</div>';
+      }).join('') || '<p class="text-center py-6 text-gray-400 text-sm">Sua sacola está vazia</p>';
+      document.getElementById('step0-subtotal').innerText = brl(totais.subtotal);
+    }
+
+    /* ---------- checkout ---------- */
+    function abrirModalCheckout() {
+      if (lojaFechadaAviso()) return;
+      carregarDadosSalvosCliente();
+      renderizarItensSacola();
+      irParaEtapaCheckout(0);
+      document.getElementById('modal-checkout').classList.remove('hidden');
+      carregarConfiguracaoLoja(); // garante taxa / entregas atualizadas
+    }
+
+    function fecharModalCheckout() {
+      document.getElementById('modal-checkout').classList.add('hidden');
+    }
+
+    function irParaEtapaCheckout(step) {
+      etapaAtualCheckout = step;
+      [0, 1, 2, 3].forEach(function (i) { document.getElementById('checkout-step-' + i).classList.add('hidden'); });
+      document.getElementById('checkout-step-' + step).classList.remove('hidden');
+      document.getElementById('titulo-etapa-checkout').innerText = ["Sua Sacola", "Entrega e agendamento", "Forma de pagamento", "Resumo do pedido"][step];
+
+      for (var i = 0; i <= 3; i++) {
+        document.getElementById('dot-' + i).className = 'w-2.5 h-2.5 rounded-full transition-all ' + (i <= step ? 'bg-[var(--cor)]' : 'bg-gray-300');
+        if (i > 0) document.getElementById('line-' + i).className = 'w-6 h-0.5 transition-all ' + (i <= step ? 'bg-[var(--cor)]' : 'bg-gray-200');
+      }
+
+      var btn = document.getElementById('btn-acao-checkout');
+      btn.disabled = false;
+      btn.className = "w-full bg-[var(--cor)] hover:bg-purple-900 text-white font-extrabold py-3.5 rounded-2xl shadow-lg transition active:scale-95 text-sm cursor-pointer";
+      if (step === 0) btn.innerText = "Continuar";
+      else if (step === 1) { btn.innerText = "Continuar para Pagamento"; aplicarConfiguracaoNaTela(); }
+      else if (step === 2) {
+        btn.innerText = "Revisar Pedido";
+        if (!estadoCheckout.pagamentoValor) {
+          btn.disabled = true;
+          btn.className = "w-full bg-gray-200 text-gray-400 font-extrabold py-3.5 rounded-2xl text-sm cursor-not-allowed";
+        }
+      } else if (step === 3) {
+        preencherResumoFinal();
+        btn.innerText = estadoCheckout.pagamentoValor === 'Pix' ? "Ir para Pagamento" : "Finalizar Pedido";
+      }
+    }
+
+    function voltarEtapaCheckout() {
+      if (etapaAtualCheckout > 0) irParaEtapaCheckout(etapaAtualCheckout - 1);
+      else fecharModalCheckout();
+    }
+
+    function avancarEtapaCheckout() {
+      if (etapaAtualCheckout === 0) {
+        if (carrinho.length) irParaEtapaCheckout(1);
+      } else if (etapaAtualCheckout === 1) {
+        var nome = document.getElementById('cliente-nome').value.trim();
+        var tel = document.getElementById('cliente-telefone').value.trim();
+        if (nome.length < 2 || !tel) { alert("Por favor, preencha seu Nome e WhatsApp para continuar."); return; }
+        if (somenteDigitos(tel).length < 10) { alert("Informe o WhatsApp com DDD. Ex: (16) 99999-9999"); return; }
+        if (estadoCheckout.quando === 'Agendar') {
+          if (!estadoCheckout.horarioAgendado) { alert("Selecione o horário desejado para o agendamento."); return; }
+          var partes = estadoCheckout.horarioAgendado.split(':');
+          var agora = new Date(), hAg = new Date();
+          hAg.setHours(Number(partes[0]), Number(partes[1]), 0, 0);
+          if (hAg.getTime() < agora.getTime() + 20 * 60000) { alert("Escolha um horário pelo menos 20 minutos à frente."); return; }
+        }
+        if (!config.entregasAtivas && estadoCheckout.tipoRecebimento === 'Entrega') selecionarTipoRecebimento('Retirada');
+        if (estadoCheckout.tipoRecebimento === 'Entrega' && !estadoCheckout.enderecoSalvo) {
+          alert("Por favor, adicione seu endereço de entrega.");
+          abrirFormNovoEndereco();
+          return;
+        }
+        try { localStorage.setItem('loja_cli_nome', nome); localStorage.setItem('loja_cli_tel', tel); } catch (e) {}
+        irParaEtapaCheckout(2);
+      } else if (etapaAtualCheckout === 2) {
+        if (estadoCheckout.pagamentoValor) irParaEtapaCheckout(3);
+      } else if (etapaAtualCheckout === 3) {
+        enviarPedidoFinal();
+      }
+    }
+
+    function selecionarQuando(opcao) {
+      estadoCheckout.quando = opcao;
+      var cardP = document.getElementById('card-quando-padrão'), radioP = document.getElementById('radio-quando-padrão');
+      var cardA = document.getElementById('card-quando-agendar'), radioA = document.getElementById('radio-quando-agendar');
+      var box = document.getElementById('box-input-agendar');
+      var marcado = '<div class="w-2.5 h-2.5 rounded-full bg-[var(--cor)]"></div>';
+      var padrao = opcao === 'Padrão';
+      cardP.className = padrao ? "p-3.5 rounded-2xl border-2 border-[var(--cor)] bg-purple-50/30 flex items-center justify-between cursor-pointer transition" : "p-3.5 rounded-2xl border border-gray-200 bg-white flex items-center justify-between cursor-pointer transition";
+      radioP.className = "w-5 h-5 rounded-full border-2 flex items-center justify-center " + (padrao ? "border-[var(--cor)]" : "border-gray-300");
+      radioP.innerHTML = padrao ? marcado : '';
+      cardA.className = !padrao ? "rounded-2xl border-2 border-[var(--cor)] bg-purple-50/30 overflow-hidden cursor-pointer transition" : "rounded-2xl border border-gray-200 bg-white overflow-hidden cursor-pointer transition";
+      radioA.className = "w-5 h-5 rounded-full border-2 flex items-center justify-center " + (!padrao ? "border-[var(--cor)]" : "border-gray-300");
+      radioA.innerHTML = !padrao ? marcado : '';
+      box.classList.toggle('hidden', padrao);
+    }
+
+    function atualizarTextoAgendamento() {
+      var val = document.getElementById('input-horario-agendamento').value;
+      estadoCheckout.horarioAgendado = val;
+      document.getElementById('texto-horario-agendado').innerText = val ? ("Para hoje às " + val) : "Escolher horário para hoje";
+    }
+
+    function selecionarTipoRecebimento(tipo) {
+      if (tipo === 'Entrega' && !config.entregasAtivas) {
+        avisoRapido(MENSAGEM_APENAS_RETIRADA);
+        tipo = 'Retirada';
+      }
+      estadoCheckout.tipoRecebimento = tipo;
+      var btnEnt = document.getElementById('btn-tipo-entrega');
+      var btnRet = document.getElementById('btn-tipo-retirada');
+      var ativo = "p-3.5 rounded-2xl border-2 border-[var(--cor)] bg-purple-50/30 flex flex-col items-center justify-center gap-1.5 text-[var(--cor)] transition cursor-pointer";
+      var inativo = "p-3.5 rounded-2xl border border-gray-200 bg-white flex flex-col items-center justify-center gap-1.5 text-gray-500 hover:bg-gray-50 transition cursor-pointer";
+      btnEnt.className = tipo === 'Entrega' ? ativo : inativo;
+      btnRet.className = tipo === 'Retirada' ? ativo : inativo;
+      document.getElementById('secao-endereco-entrega').classList.toggle('hidden', tipo !== 'Entrega');
+      var infoEnd = document.getElementById('info-endereco-loja');
+      if (infoEnd) { infoEnd.querySelector('span').textContent = 'Retire em: ' + (config.enderecoLoja || ''); infoEnd.classList.toggle('hidden', tipo !== 'Retirada' || !config.enderecoLoja); }
+      var titPag = document.getElementById('titulo-pagar-entrega');
+      if (titPag) titPag.innerText = tipo === 'Entrega' ? "Pagar na entrega" : "Pagar na retirada";
+      var txtPadrao = document.getElementById('texto-quando-padrao');
+      if (txtPadrao) txtPadrao.innerText = tipo === 'Entrega' ? "Entrega em 40 a 60 minutos" : "Pronto para retirar em 40 a 60 minutos";
+    }
+
+    function abrirFormNovoEndereco() {
+      document.getElementById('form-inline-endereco').classList.remove('hidden');
+      var e = estadoCheckout.enderecoSalvo;
+      if (e) {
+        document.getElementById('input-end-rua').value = e.rua || '';
+        document.getElementById('input-end-numero').value = e.numero || '';
+        document.getElementById('input-end-bairro').value = e.bairro || '';
+        document.getElementById('input-end-comp').value = e.comp || '';
+        document.getElementById('input-end-ref').value = e.referencia || '';
+      }
+      document.getElementById('input-end-rua').focus();
+    }
+
+    function salvarEnderecoLocal() {
+      var rua = document.getElementById('input-end-rua').value.trim();
+      var numero = document.getElementById('input-end-numero').value.trim();
+      var bairro = document.getElementById('input-end-bairro').value.trim();
+      var comp = document.getElementById('input-end-comp').value.trim();
+      var referencia = document.getElementById('input-end-ref').value.trim();
+      if (!rua || !numero || !bairro) { alert("Preencha Rua, Número e Bairro para continuar."); return; }
+      estadoCheckout.enderecoSalvo = { rua: rua, numero: numero, bairro: bairro, comp: comp, referencia: referencia };
+      if (contaAtual()) contaGuardarEndereco(estadoCheckout.enderecoSalvo); // salva na conta para os próximos pedidos
+      try { localStorage.setItem('loja_cli_end', JSON.stringify(estadoCheckout.enderecoSalvo)); } catch (e) {}
+      document.getElementById('form-inline-endereco').classList.add('hidden');
+      exibirCartaoEnderecoSalvo();
+    }
+
+    function exibirCartaoEnderecoSalvo() {
+      var end = estadoCheckout.enderecoSalvo;
+      if (!end) return;
+      document.getElementById('card-endereco-salvo').classList.remove('hidden');
+      document.getElementById('label-btn-endereco').innerText = "Alterar endereço";
+      document.getElementById('end-salvo-rua').innerText = end.rua + ", " + end.numero + (end.comp ? " (" + end.comp + ")" : "");
+      document.getElementById('end-salvo-bairro').innerText = end.bairro + (end.referencia ? " · Ref: " + end.referencia : "");
+    }
+
+    function selecionarPagamento(valor, label) {
+      estadoCheckout.pagamentoValor = valor;
+      estadoCheckout.pagamentoLabel = label;
+      document.querySelectorAll('.pay-option').forEach(function (card) {
+        card.className = "pay-option p-4 rounded-2xl border border-gray-200 bg-white flex items-center justify-between cursor-pointer transition";
+        var r = card.querySelector('.pay-radio');
+        if (r) { r.className = "pay-radio w-5 h-5 rounded-full border-2 border-gray-300 flex items-center justify-center"; r.innerHTML = ''; }
+      });
+      var ids = { 'Pix': 'pay-card-Pix', 'Dinheiro': 'pay-card-Dinheiro', 'Cartão de Crédito': 'pay-card-CartaoCredito', 'Cartão de Débito': 'pay-card-CartaoDebito' };
+      var escolhido = document.getElementById(ids[valor]);
+      if (escolhido) {
+        escolhido.className = "pay-option p-4 rounded-2xl border-2 border-[var(--cor)] bg-purple-50/30 flex items-center justify-between cursor-pointer transition";
+        var rA = escolhido.querySelector('.pay-radio');
+        if (rA) { rA.className = "pay-radio w-5 h-5 rounded-full border-2 border-[var(--cor)] flex items-center justify-center"; rA.innerHTML = '<div class="w-2.5 h-2.5 rounded-full bg-[var(--cor)]"></div>'; }
+      }
+      document.getElementById('box-troco-dinheiro').classList.toggle('hidden', valor !== 'Dinheiro');
+      var btn = document.getElementById('btn-acao-checkout');
+      btn.disabled = false;
+      btn.className = "w-full bg-[var(--cor)] hover:bg-purple-900 text-white font-extrabold py-3.5 rounded-2xl shadow-lg transition active:scale-95 text-sm cursor-pointer";
+    }
+
+    function enderecoFormatadoAtual() {
+      var e = estadoCheckout.enderecoSalvo;
+      if (estadoCheckout.tipoRecebimento !== 'Entrega' || !e) return "Retirada na Loja";
+      return e.rua + ", " + e.numero + (e.comp ? " (" + e.comp + ")" : "") + " - " + e.bairro + (e.referencia ? " | Ref: " + e.referencia : "");
+    }
+
+    function preencherResumoFinal() {
+      var totais = calcularTotais();
+      var entrega = estadoCheckout.tipoRecebimento === 'Entrega';
+      document.getElementById('resumo-final-tipo').innerText = estadoCheckout.tipoRecebimento;
+      document.getElementById('resumo-final-endereco').innerText = entrega ? enderecoFormatadoAtual() : "Retirar no balcão da loja";
+      document.getElementById('resumo-final-tempo-label').innerText = entrega ? "Tempo de entrega" : "Tempo de preparo";
+      document.getElementById('resumo-final-tempo').innerText = estadoCheckout.quando === 'Agendar' ? ("Agendado para hoje às " + estadoCheckout.horarioAgendado) : "40-60 min";
+      var pag = estadoCheckout.pagamentoLabel;
+      var troco = document.getElementById('input-troco-para').value.trim();
+      if (estadoCheckout.pagamentoValor === 'Dinheiro' && troco) pag += " (" + troco + ")";
+      document.getElementById('resumo-final-pagamento').innerText = pag;
+      document.getElementById('resumo-final-cliente').innerText = document.getElementById('cliente-nome').value.trim();
+      document.getElementById('resumo-final-telefone').innerText = document.getElementById('cliente-telefone').value.trim();
+      document.getElementById('resumo-final-subtotal').innerText = brl(totais.subtotal);
+      document.getElementById('resumo-final-taxa').innerText = totais.taxa > 0 ? brl(totais.taxa) : (entrega ? 'Grátis' : 'R$ 0,00');
+      document.getElementById('resumo-final-total').innerText = brl(totais.total);
+    }
+
+    var MENSAGENS_ERRO_PEDIDO = {
+      LOJA_FECHADA: "A loja acabou de fechar e não está recebendo pedidos agora.",
+      ENTREGAS_DESATIVADAS: MENSAGEM_APENAS_RETIRADA + ". Volte e escolha Retirada.",
+      PRODUTO_INDISPONIVEL: "Um item da sua sacola acabou de esgotar",
+      DADOS_INVALIDOS: "Confira seus dados"
+    };
+
+    function traduzirErroPedido(msg) {
+      msg = String(msg || '');
+      for (var k in MENSAGENS_ERRO_PEDIDO) {
+        if (msg.indexOf(k) === 0) {
+          var detalhe = msg.slice(k.length).replace(/^:\s*/, '');
+          return MENSAGENS_ERRO_PEDIDO[k] + (detalhe && k !== 'LOJA_FECHADA' && k !== 'ENTREGAS_DESATIVADAS' ? ': ' + detalhe : '') + '.';
+        }
+      }
+      if (/Failed to fetch|NetworkError/i.test(msg)) return "Sem conexão com a internet. Tente novamente.";
+      if (/criar_pedido/.test(msg)) return "O sistema da loja está em atualização. Tente novamente em alguns minutos.";
+      return "Não foi possível enviar o pedido. Tente novamente.";
+    }
+
+    async function enviarPedidoFinal() {
+      var btn = document.getElementById('btn-acao-checkout');
+      if (btn.disabled) return;
+      btn.disabled = true;
+      btn.innerText = "Enviando pedido...";
+
+      var nome = document.getElementById('cliente-nome').value.trim();
+      var tel = document.getElementById('cliente-telefone').value.trim();
+      var obsInput = document.getElementById('cliente-obs').value.trim();
+      var troco = document.getElementById('input-troco-para').value.trim();
+      var pagamento = estadoCheckout.pagamentoValor;
+      var enderecoFormatado = enderecoFormatadoAtual();
+
+      var obsLista = [];
+      if (estadoCheckout.quando === 'Agendar') obsLista.push("AGENDADO: " + estadoCheckout.horarioAgendado);
+      if (pagamento === 'Dinheiro' && troco) obsLista.push("Troco: " + troco);
+      if (obsInput) obsLista.push(obsInput);
+      var obsFinal = obsLista.join(" | ");
+
+      try {
+        var sb = initClient();
+        if (!sb) throw new Error('Failed to fetch');
+        var res = await sb.rpc('criar_pedido', { p_dados: {
+          cliente_nome: nome,
+          cliente_telefone: tel,
+          token_conta: contaToken() || null,
+          tipo_recebimento: estadoCheckout.tipoRecebimento,
+          endereco: enderecoFormatado,
+          forma_pagamento: pagamento,
+          observacoes: obsFinal,
+          agendado_para: estadoCheckout.quando === 'Agendar' ? estadoCheckout.horarioAgendado : null,
+          itens: carrinho.map(function (item) {
+            return {
+              id: item.produtoId,
+              nome: item.nome,
+              quantidade: item.qtd,
+              adicionais: item.adicionais.map(function (a) { return a.id; }),
+              sem: item.sem,
+              ponto: item.ponto,
+              escolhas: item.escolhas.map(function (e) { return e.produto_id; }),
+              pao: item.pao ? item.pao.id : null,
+              observacao: item.obs || ""
+            };
+          })
+        } });
+        if (res.error) throw res.error;
+
+        var r = res.data;
+        pedidoAtual = { id: r.id, token: r.token, total: Number(r.total), formaPagamento: pagamento, nome: nome };
+        try { localStorage.setItem('loja_pedido_atual', JSON.stringify({ id: r.id, token: r.token, quando: Date.now() })); } catch (e) {}
+        salvarMeuPedido(r.id, r.token);
+        fecharModalCheckout();
+
+        // Mensagem de WhatsApp com os valores CONFIRMADOS pelo banco
+        var texto = '*PEDIDO #' + r.id + (config.nomeLoja ? ' - ' + config.nomeLoja.toUpperCase() : '') + '*\n\n';
+        texto += '*CLIENTE:* ' + nome + ' (' + tel + ')\n';
+        texto += '*TIPO:* ' + estadoCheckout.tipoRecebimento + (estadoCheckout.quando === 'Agendar' ? ' (Agendado: ' + estadoCheckout.horarioAgendado + ')' : '') + '\n';
+        texto += '*ENDEREÇO:* ' + enderecoFormatado + '\n';
+        texto += '*PAGAMENTO:* ' + pagamento + '\n';
+        if (obsFinal) texto += '*Obs:* ' + obsFinal + '\n';
+        texto += '\n*ITENS DO PEDIDO:*\n';
+        (r.itens || []).forEach(function (i) {
+          texto += '\n• *' + i.quantidade + 'x ' + i.nome + '* — ' + brl(i.preco_unitario * i.quantidade) + '\n';
+          detalhesItem(i).forEach(function (l) { texto += '    └ ' + l + '\n'; });
+        });
+        texto += '\n*SUBTOTAL:* ' + brl(r.subtotal) + '\n';
+        texto += '*TAXA DE ENTREGA:* ' + brl(r.taxa) + '\n';
+        texto += '*TOTAL DO PEDIDO:* ' + brl(r.total) + '\n';
+        textoPedidoWhatsApp = texto;
+
+        var totalLocal = calcularTotais().total;
+        if (Math.abs(totalLocal - Number(r.total)) > 0.009) {
+          alert("Os preços foram atualizados pela loja. O total do seu pedido é " + brl(r.total) + ".");
+        }
+        iniciarEsperaAceiteLoja();
+      } catch (err) {
+        console.warn("Erro ao enviar pedido:", err);
+        btn.disabled = false;
+        btn.innerText = pagamento === 'Pix' ? "Ir para Pagamento" : "Finalizar Pedido";
+        alert(traduzirErroPedido(err && err.message));
+        if (err && /ENTREGAS_DESATIVADAS|LOJA_FECHADA|PRODUTO_INDISPONIVEL/.test(err.message)) {
+          carregarConfiguracaoLoja();
+          carregarCardapio();
+        }
+      }
+    }
+
+    /* ---------- acompanhamento do pedido ---------- */
+    async function consultarStatusPedido() {
+      if (!pedidoAtual) return null;
+      var res = await initClient().rpc('status_pedido', { p_id: pedidoAtual.id, p_token: pedidoAtual.token });
+      if (res.error) throw res.error;
+      return res.data;
+    }
+
+    function limparSacolaAposPedido() {
+      carrinho = [];
+      atualizarBarra();
+      try { localStorage.removeItem('loja_pedido_atual'); } catch (e) {}
+    }
+
+    function abrirWhatsAppDoPedido(status) {
+      if (!textoPedidoWhatsApp) return;
+      window.location.href = "https://wa.me/" + config.whatsapp + "?text=" + encodeURIComponent(textoPedidoWhatsApp + "\n\n*Status:* " + status);
+    }
+
+    function iniciarEsperaAceiteLoja() {
+      var modalEspera = document.getElementById("modalAguardandoAceite");
+      document.getElementById("pedidoNumeroBadge").innerText = "PEDIDO #" + pedidoAtual.id;
+      modalEspera.style.display = "flex";
+      var isPix = pedidoAtual.formaPagamento === 'Pix';
+
+      if (window.intervaloAceite) clearInterval(window.intervaloAceite);
+      var semResposta = 0;
+      window.intervaloAceite = setInterval(async function () {
+        try {
+          var status = await consultarStatusPedido();
+          if (!status) {
+            // pedido não existe mais (a loja excluiu)
+            if (++semResposta >= 2) {
+              clearInterval(window.intervaloAceite);
+              modalEspera.style.display = "none";
+              try { localStorage.removeItem('loja_pedido_atual'); } catch (e) {}
+              alert("O pedido #" + pedidoAtual.id + " foi cancelado pela loja. Sua sacola continua salva, se quiser tentar de novo.");
+            }
+            return;
+          }
+          semResposta = 0;
+          if (isPix && status === "Aguardando Pagamento Pix") {
+            clearInterval(window.intervaloAceite);
+            modalEspera.style.display = "none";
+            processarPagamentoPix();
+          } else if (STATUS_ACEITO.indexOf(status) !== -1) {
+            clearInterval(window.intervaloAceite);
+            modalEspera.style.display = "none";
+            limparSacolaAposPedido();
+            avisoRapido("✓ Pedido #" + pedidoAtual.id + " aceito! Já está sendo preparado.");
+            abrirMeusPedidos();
+          } else if (status === "Recusado" || status === "Cancelado") {
+            clearInterval(window.intervaloAceite);
+            modalEspera.style.display = "none";
+            limparSacolaAposPedido();
+            alert(status === "Recusado"
+              ? "Desculpe! No momento a cozinha não pôde aceitar o pedido. Tente novamente mais tarde."
+              : "Seu pedido foi cancelado.");
+          }
+        } catch (e) { console.warn("Aguardando aceite...", e); }
+      }, 3000);
+    }
+
+    async function cancelarPedidoAtual() {
+      if (!pedidoAtual) return false;
+      try {
+        var res = await initClient().rpc('cancelar_pedido', { p_id: pedidoAtual.id, p_token: pedidoAtual.token });
+        return !res.error && res.data === true;
+      } catch (e) { return false; }
+    }
+
+    async function cancelarEsperaAceite() {
+      if (!confirm("Deseja cancelar o pedido #" + (pedidoAtual ? pedidoAtual.id : '') + "?")) return;
+      var ok = await cancelarPedidoAtual();
+      if (!ok) {
+        // A loja pode ter aceitado no mesmo instante: deixa o acompanhamento resolver
+        alert("Não foi possível cancelar: a loja já começou a preparar seu pedido.");
+        return;
+      }
+      if (window.intervaloAceite) clearInterval(window.intervaloAceite);
+      document.getElementById("modalAguardandoAceite").style.display = "none";
+      try { localStorage.removeItem('loja_pedido_atual'); } catch (e) {}
+      avisoRapido("Pedido cancelado. Sua sacola continua salva.");
+    }
+
+    /* ---------- Pix ---------- */
+    var intervaloTimerPix = null;
+
+    function iniciarCronometroPix() {
+      if (intervaloTimerPix) clearInterval(intervaloTimerPix);
+      var restantes = 30 * 60, total = restantes;
+      document.getElementById("pixTimerTexto").innerText = "30 : 00";
+      document.getElementById("pixTimerBarra").style.width = "100%";
+      intervaloTimerPix = setInterval(function () {
+        restantes--;
+        if (restantes <= 0) {
+          clearInterval(intervaloTimerPix);
+          document.getElementById("pixTimerTexto").innerText = "00 : 00";
+          document.getElementById("pixTimerBarra").style.width = "0%";
+          document.getElementById("pixAvisoExtra").innerText = "O tempo acabou. Se você já pagou, aguarde a confirmação nesta tela. Se não pagou, toque na seta para cancelar o pedido.";
+          document.getElementById("pixAvisoExtra").style.display = "block";
+          return;
+        }
+        document.getElementById("pixTimerTexto").innerText = String(Math.floor(restantes / 60)).padStart(2, '0') + " : " + String(restantes % 60).padStart(2, '0');
+        document.getElementById("pixTimerBarra").style.width = (restantes / total * 100) + "%";
+      }, 1000);
+    }
+
+    // --- Pix "copia e cola" para chave direta (padrão BR Code do Banco Central) ---
+    function campoEMV(id, valor) { valor = String(valor); return id + String(valor.length).padStart(2, '0') + valor; }
+    function crc16Pix(str) {
+      var crc = 0xFFFF;
+      for (var i = 0; i < str.length; i++) {
+        crc ^= str.charCodeAt(i) << 8;
+        for (var j = 0; j < 8; j++) crc = (crc & 0x8000) ? ((crc << 1) ^ 0x1021) & 0xFFFF : (crc << 1) & 0xFFFF;
+      }
+      return crc.toString(16).toUpperCase().padStart(4, '0');
+    }
+    function textoPixSeguro(s, max) {
+      return String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^A-Za-z0-9 ]/g, '').trim().toUpperCase().slice(0, max);
+    }
+    function normalizarChavePix(chave) {
+      var c = String(chave || '').trim();
+      if (c.indexOf('@') !== -1) return c.toLowerCase();                                   // e-mail
+      if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(c)) return c.toLowerCase(); // aleatória
+      if (c.charAt(0) === '+') return '+' + somenteDigitos(c);                              // telefone já com +55
+      if (/^\d{3}\.\d{3}\.\d{3}-\d{2}$/.test(c) || /^\d{2}\.\d{3}\.\d{3}\/\d{4}-\d{2}$/.test(c)) return somenteDigitos(c); // CPF/CNPJ formatado
+      var d = somenteDigitos(c);
+      if (/[()\s]/.test(c) && (d.length === 10 || d.length === 11)) return '+55' + d;       // telefone formatado
+      if (d.length === 13 && d.indexOf('55') === 0) return '+' + d;                         // 55 + DDD + número
+      return d || c;                                                                        // CPF/CNPJ só números
+    }
+    function gerarPixCopiaECola(valor, pedidoId) {
+      var conta = campoEMV('00', 'br.gov.bcb.pix') + campoEMV('01', normalizarChavePix(config.chavePix));
+      var p = campoEMV('00', '01') + campoEMV('26', conta) + campoEMV('52', '0000') + campoEMV('53', '986') +
+        campoEMV('54', Number(valor).toFixed(2)) + campoEMV('58', 'BR') +
+        campoEMV('59', textoPixSeguro(config.nomePix, 25) || 'RECEBEDOR') + campoEMV('60', textoPixSeguro(config.cidadePix, 15) || 'BRASIL') +
+        campoEMV('62', campoEMV('05', ('PED' + pedidoId).replace(/[^A-Za-z0-9]/g, '').slice(0, 25))) + '6304';
+      return p + crc16Pix(p);
+    }
+    function carregarBibliotecaQr() {
+      return new Promise(function (resolve) {
+        if (window.qrcode) return resolve(true);
+        var s = document.createElement('script');
+        s.src = 'https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js';
+        s.onload = function () { resolve(!!window.qrcode); };
+        s.onerror = function () { resolve(false); };
+        document.head.appendChild(s);
+      });
+    }
+
+    async function processarPagamentoPix() {
+      var modal = document.getElementById("modalPix");
+      var carregando = document.getElementById("pixCarregando");
+      var conteudo = document.getElementById("pixConteudo");
+      modal.style.display = "flex";
+      carregando.style.display = "block";
+      conteudo.style.display = "none";
+      document.getElementById("pixConfirmado").style.display = "none";
+      document.getElementById("pixAvisoExtra").style.display = "none";
+      var img = document.getElementById("pixQrImg");
+
+      try {
+        var codigo, qrSrc = '';
+        if (!config.chavePix) throw new Error("a loja ainda não cadastrou a chave Pix");
+        codigo = gerarPixCopiaECola(pedidoAtual.total, pedidoAtual.id);
+        if (await carregarBibliotecaQr()) {
+          var qr = window.qrcode(0, 'M'); qr.addData(codigo); qr.make();
+          qrSrc = qr.createDataURL(6, 2);
+        }
+        document.getElementById("pixAvisoExtra").innerText = "Depois de pagar, aguarde nesta tela: a loja confirma o recebimento e seu pedido segue para a cozinha.";
+        document.getElementById("pixAvisoExtra").style.display = "block";
+        img.src = qrSrc;
+        img.style.display = qrSrc ? 'block' : 'none';
+        document.getElementById("pixCodigoCopia").value = codigo;
+        document.getElementById("pixCodigoBox").innerText = codigo;
+        carregando.style.display = "none";
+        conteudo.style.display = "flex";
+        iniciarCronometroPix();
+        escutarConfirmacaoPix();
+      } catch (err) {
+        alert("Não foi possível gerar a cobrança Pix: " + err.message + "\n\nO pedido #" + pedidoAtual.id + " foi registrado. Fale com a loja pelo WhatsApp.");
+        modal.style.display = "none";
+      }
+    }
+
+    function escutarConfirmacaoPix() {
+      if (window.intervaloPix) clearInterval(window.intervaloPix);
+      var semRespostaPix = 0;
+      window.intervaloPix = setInterval(async function () {
+        try {
+          var status = await consultarStatusPedido();
+          if (!status) {
+            if (++semRespostaPix >= 2) {
+              pararPix();
+              document.getElementById("modalPix").style.display = "none";
+              alert("O pedido #" + pedidoAtual.id + " foi cancelado pela loja. Se você já pagou, fale com a loja pelo WhatsApp.");
+            }
+            return;
+          }
+          semRespostaPix = 0;
+          if (STATUS_ACEITO.indexOf(status) !== -1) {
+            pararPix();
+            limparSacolaAposPedido();
+            document.getElementById("pixConteudo").style.display = "none";
+            document.getElementById("pixAvisoExtra").style.display = "none";
+            document.getElementById("pixConfirmado").style.display = "block";
+          } else if (status === "Recusado" || status === "Cancelado") {
+            pararPix();
+            document.getElementById("modalPix").style.display = "none";
+            alert("O pedido #" + pedidoAtual.id + " foi " + status.toLowerCase() + ". Se você já pagou, fale com a loja pelo WhatsApp.");
+          }
+        } catch (e) { console.warn("Aguardando confirmação...", e); }
+      }, 2500);
+    }
+
+    function pararPix() {
+      if (window.intervaloPix) clearInterval(window.intervaloPix);
+      if (intervaloTimerPix) clearInterval(intervaloTimerPix);
+    }
+
+    async function cancelarModalPix() {
+      if (document.getElementById("pixConfirmado").style.display === "block") { concluirFluxoPix(); return; }
+      if (!confirm("Deseja cancelar o pedido?\n\nSe você JÁ PAGOU, não cancele: aguarde a confirmação nesta tela.")) return;
+      var ok = await cancelarPedidoAtual();
+      if (!ok) { alert("Não foi possível cancelar: o pagamento já foi confirmado ou a loja já está preparando o pedido."); return; }
+      pararPix();
+      document.getElementById("modalPix").style.display = "none";
+      try { localStorage.removeItem('loja_pedido_atual'); } catch (e) {}
+      avisoRapido("Pedido cancelado. Sua sacola continua salva.");
+    }
+
+    function copiarPixPayload() {
+      var codigo = document.getElementById("pixCodigoCopia").value;
+      var feito = function () {
+        var btn = document.getElementById("btnCopiarPix");
+        btn.innerText = "Código Copiado! ✓";
+        btn.style.background = "#16a34a";
+        setTimeout(function () { btn.innerText = "Copiar código"; btn.style.background = "var(--cor)"; }, 3000);
+      };
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(codigo).then(feito).catch(function () { copiarManual(codigo); feito(); });
+      } else { copiarManual(codigo); feito(); }
+    }
+    function copiarManual(texto) { // para navegadores antigos
+      var t = document.createElement('textarea');
+      t.value = texto; t.style.position = 'fixed'; t.style.opacity = '0';
+      document.body.appendChild(t); t.select();
+      try { document.execCommand('copy'); } catch (e) {}
+      t.remove();
+    }
+
+    function concluirFluxoPix() {
+      document.getElementById("modalPix").style.display = "none";
+      limparSacolaAposPedido();
+      abrirMeusPedidos();
+    }
+
+    /* =================================================================
+     * MEUS PEDIDOS — acompanhamento em tempo real
+     * O aparelho guarda o número + código secreto de cada pedido feito aqui.
+     * ================================================================= */
+    var CHAVE_MEUS_PEDIDOS = 'loja_meus_pedidos';
+    var STATUS_ATIVOS_CLIENTE = ['Aguardando Aceite da Loja', 'Recebido', 'Aguardando Pagamento Pix', 'Em preparo', 'Aceito', 'Saiu para entrega'];
+    var meusPedidosCache = [];
+    var ultimoStatusVisto = {};
+    var _timerAcompanhamento = null, _buscandoMeus = false, _faltandoNoServidor = {};
+
+    function lerMeusPedidosLocal() {
+      try { var l = JSON.parse(localStorage.getItem(CHAVE_MEUS_PEDIDOS) || '[]'); return Array.isArray(l) ? l : []; } catch (e) { return []; }
+    }
+    function gravarMeusPedidosLocal(lista) {
+      try { localStorage.setItem(CHAVE_MEUS_PEDIDOS, JSON.stringify(lista.slice(0, 30))); } catch (e) {}
+    }
+    function salvarMeuPedido(id, token) {
+      var lista = lerMeusPedidosLocal().filter(function (p) { return p.id !== id; });
+      lista.unshift({ id: id, token: token, criado: Date.now() });
+      gravarMeusPedidosLocal(lista);
+      agendarAcompanhamento(1500);
+    }
+
+    function ehRetiradaCliente(p) { return p.tipo_recebimento === 'Retirada' || /^retirada/i.test(p.cliente_endereco || ''); }
+
+    // Texto amigável, cor e etapa (0 a 3) de cada status
+    function infoStatus(p) {
+      var ret = ehRetiradaCliente(p), s = p.status;
+      if (s === 'Aguardando Aceite da Loja' || s === 'Recebido') return { etapa: 0, texto: 'Aguardando a loja aceitar', icone: 'fa-clock', cor: 'bg-amber-100 text-amber-800' };
+      if (s === 'Aguardando Pagamento Pix') return { etapa: 0, texto: 'Aguardando seu pagamento Pix', icone: 'fa-qrcode', cor: 'bg-blue-100 text-blue-800' };
+      if (s === 'Em preparo' || s === 'Aceito') return { etapa: 1, texto: 'Seu pedido está sendo preparado', icone: 'fa-fire-burner', cor: 'bg-purple-100 text-purple-800' };
+      if (s === 'Saiu para entrega') return ret
+        ? { etapa: 2, texto: 'Pronto para retirada! Pode vir buscar', icone: 'fa-bag-shopping', cor: 'bg-indigo-100 text-indigo-800' }
+        : { etapa: 2, texto: 'Saiu para entrega', icone: 'fa-motorcycle', cor: 'bg-indigo-100 text-indigo-800' };
+      if (s === 'Concluído') return { etapa: 3, texto: ret ? 'Retirado. Bom apetite!' : 'Entregue. Bom apetite!', icone: 'fa-circle-check', cor: 'bg-emerald-100 text-emerald-800' };
+      if (s === 'Recusado') return { etapa: -1, texto: 'A loja não pôde aceitar este pedido', icone: 'fa-circle-xmark', cor: 'bg-rose-100 text-rose-800' };
+      if (s === 'Cancelado') return { etapa: -1, texto: 'Pedido cancelado', icone: 'fa-ban', cor: 'bg-gray-200 text-gray-700' };
+      return { etapa: 0, texto: s || '-', icone: 'fa-clock', cor: 'bg-gray-100 text-gray-700' };
+    }
+
+    function linhaDoTempo(p, info) {
+      var ret = ehRetiradaCliente(p);
+      var etapas = ret
+        ? [['fa-paper-plane', 'Enviado'], ['fa-blender', 'Em preparo'], ['fa-bag-shopping', 'Pronto p/ retirar'], ['fa-circle-check', 'Retirado']]
+        : [['fa-paper-plane', 'Enviado'], ['fa-blender', 'Em preparo'], ['fa-motorcycle', 'Saiu p/ entrega'], ['fa-circle-check', 'Entregue']];
+      if (info.etapa < 0) return '';
+      var html = '<div class="flex items-start justify-between mt-3 relative">';
+      etapas.forEach(function (e, i) {
+        var feito = i <= info.etapa, atual = i === info.etapa && info.etapa < 3;
+        html += '<div class="flex flex-col items-center flex-1 relative z-10">' +
+          '<span class="w-9 h-9 rounded-full flex items-center justify-center text-sm ' + (feito ? 'bg-[var(--cor)] text-white' : 'bg-gray-200 text-gray-400') + (atual ? ' ring-4 ring-purple-200 animate-pulse' : '') + '"><i class="fa-solid ' + e[0] + '"></i></span>' +
+          '<span class="text-[10px] mt-1 text-center leading-tight ' + (feito ? 'text-[var(--cor)] font-extrabold' : 'text-gray-400 font-semibold') + '">' + e[1] + '</span></div>';
+        if (i < etapas.length - 1) html += '<div class="h-1 flex-1 mt-4 -mx-4 rounded ' + (i < info.etapa ? 'bg-[var(--cor)]' : 'bg-gray-200') + '"></div>';
+      });
+      return html + '</div>';
+    }
+
+    function horaCurta(iso) { return iso ? new Date(iso).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) : ''; }
+    function dataCurta(iso) {
+      if (!iso) return '';
+      var d = new Date(iso), hoje = new Date();
+      var mesmoDia = d.toDateString() === hoje.toDateString();
+      return (mesmoDia ? 'Hoje' : d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })) + ' às ' + horaCurta(iso);
+    }
+
+    function renderizarMeusPedidos() {
+      var box = document.getElementById('lista-meus-pedidos');
+      var nome = '', tel = '';
+      try { nome = localStorage.getItem('loja_cli_nome') || ''; tel = localStorage.getItem('loja_cli_tel') || ''; } catch (e) {}
+      document.getElementById('meus-pedidos-cliente').textContent = nome ? ('Olá, ' + nome.split(' ')[0] + (tel ? ' · ' + tel : '')) : 'Acompanhe aqui o andamento dos seus pedidos';
+      var rodape = document.getElementById('rodape-meus-pedidos');
+      rodape.innerHTML = contaAtual()
+        ? '<p class="text-[11px] text-gray-500"><i class="fa-solid fa-circle-info mr-1"></i>Mostrando os pedidos da sua conta dos <strong>últimos 30 dias</strong>.</p>'
+        : '<p class="text-[11px] text-gray-500 leading-relaxed">Você está vendo os pedidos feitos <strong>neste aparelho</strong>.</p><button onclick="abrirPainelConta()" class="inline-flex items-center gap-2 bg-[var(--cor)] text-white font-bold text-xs px-4 py-2.5 rounded-xl cursor-pointer"><i class="fa-solid fa-circle-user"></i> Entrar ou criar conta</button><p class="text-[10px] text-gray-400">Com a conta, seus dados e pedidos ficam salvos em qualquer celular.</p>';
+      if (!lerMeusPedidosLocal().length && !(contaAtual() && meusPedidosCache.length)) {
+        if (contaAtual() && _buscandoMeus) { box.innerHTML = '<p class="text-center text-sm text-gray-400 py-10"><i class="fa-solid fa-spinner animate-spin mr-1"></i> Carregando seus pedidos...</p>'; return; }
+        box.innerHTML = '<div class="text-center py-14 px-6"><div class="w-16 h-16 rounded-full bg-purple-100 text-[var(--cor)] text-2xl flex items-center justify-center mx-auto mb-3"><i class="fa-solid fa-receipt"></i></div><p class="font-extrabold text-gray-800">' + (contaAtual() ? 'Nenhum pedido nos últimos 30 dias' : 'Você ainda não fez pedidos neste aparelho') + '</p><p class="text-xs text-gray-500 mt-1">Quando fizer um pedido, ele aparece aqui com o andamento em tempo real.</p><button onclick="fecharMeusPedidos()" class="mt-4 bg-[var(--cor)] text-white font-bold text-sm px-5 py-2.5 rounded-xl cursor-pointer">Ver cardápio</button></div>';
+        return;
+      }
+      if (!meusPedidosCache.length) { box.innerHTML = '<p class="text-center text-sm text-gray-400 py-10"><i class="fa-solid fa-spinner animate-spin mr-1"></i> Carregando seus pedidos...</p>'; return; }
+
+      var ativos = meusPedidosCache.filter(function (p) { return STATUS_ATIVOS_CLIENTE.indexOf(p.status) !== -1; });
+      var anteriores = meusPedidosCache.filter(function (p) { return STATUS_ATIVOS_CLIENTE.indexOf(p.status) === -1; });
+      var cartao = function (p, destaque) {
+        var info = infoStatus(p);
+        var itens = (Array.isArray(p.itens) ? p.itens : []).map(function (i) {
+          var det = detalhesItem(i); var comps = det.length ? '<br><span class="text-[11px] text-purple-700">' + esc(det.join(' · ')) + '</span>' : '';
+          return '<li>' + esc(i.quantidade || 1) + 'x ' + esc(i.nome || 'Item') + comps + '</li>';
+        }).join('');
+        var botoes = '';
+        if (p.status === 'Aguardando Pagamento Pix') botoes += '<button onclick="pagarPixDoPedido(' + Number(p.id) + ')" class="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs py-2.5 rounded-xl cursor-pointer"><i class="fa-solid fa-qrcode mr-1"></i> Pagar com Pix</button>';
+        if (['Aguardando Aceite da Loja', 'Recebido', 'Aguardando Pagamento Pix'].indexOf(p.status) !== -1) botoes += '<button onclick="cancelarMeuPedido(' + Number(p.id) + ')" class="bg-white border border-gray-200 text-gray-600 hover:bg-gray-50 font-bold text-xs px-3 py-2.5 rounded-xl cursor-pointer">Cancelar</button>';
+        botoes += '<a href="https://wa.me/' + esc(config.whatsapp) + '?text=' + encodeURIComponent('Olá! Gostaria de falar sobre o meu pedido #' + p.id + '.') + '" target="_blank" rel="noopener" class="' + (botoes ? '' : 'flex-1 ') + 'text-center bg-white border border-emerald-200 text-emerald-700 hover:bg-emerald-50 font-bold text-xs px-3 py-2.5 rounded-xl"><i class="fa-brands fa-whatsapp mr-1"></i> Falar com a loja</a>';
+        var detalheTempo = p.status === 'Saiu para entrega' && p.despachado_em ? ' · desde ' + horaCurta(p.despachado_em) : (p.status === 'Concluído' && p.concluido_em ? ' · ' + horaCurta(p.concluido_em) : '');
+        return '<div class="bg-white rounded-2xl border ' + (destaque ? 'border-purple-300 shadow-md' : 'border-gray-200 shadow-sm') + ' p-4">' +
+          '<div class="flex items-start justify-between gap-2"><div><span class="text-xs font-black bg-purple-100 text-purple-900 px-2 py-0.5 rounded-md">#' + esc(p.id) + '</span> <span class="text-[11px] text-gray-400">' + esc(dataCurta(p.created_at)) + '</span>' +
+          '<p class="text-[11px] text-gray-500 mt-1"><i class="fa-solid ' + (ehRetiradaCliente(p) ? 'fa-store' : 'fa-location-dot') + ' mr-1"></i>' + (ehRetiradaCliente(p) ? 'Retirada na loja' : esc(p.cliente_endereco || 'Entrega')) + '</p></div>' +
+          '<span class="text-base font-black text-[var(--cor)] whitespace-nowrap">' + brl(p.total) + '</span></div>' +
+          '<div class="mt-3 rounded-xl px-3 py-2.5 flex items-center gap-2 ' + info.cor + '"><i class="fa-solid ' + info.icone + '"></i><span class="text-sm font-extrabold">' + esc(info.texto) + '</span><span class="text-[11px] opacity-70">' + esc(detalheTempo) + '</span></div>' +
+          (destaque ? linhaDoTempo(p, info) : '') +
+          '<details class="mt-3"><summary class="text-[11px] font-bold text-gray-500 cursor-pointer">Ver itens · ' + esc(p.forma_pagamento || '') + '</summary><ul class="text-xs text-gray-700 mt-2 space-y-1 list-disc pl-5">' + itens + '</ul>' +
+          (Number(p.taxa_entrega) > 0 ? '<p class="text-[11px] text-gray-500 mt-1.5">Taxa de entrega: ' + brl(p.taxa_entrega) + '</p>' : '') + '</details>' +
+          '<div class="flex gap-2 mt-3">' + botoes + '</div></div>';
+      };
+      box.innerHTML =
+        (ativos.length ? '<p class="text-xs font-extrabold text-[var(--cor)] uppercase tracking-wide">Em andamento</p>' + ativos.map(function (p) { return cartao(p, true); }).join('') : '') +
+        (anteriores.length ? '<p class="text-xs font-extrabold text-gray-500 uppercase tracking-wide pt-2">Pedidos anteriores</p>' + anteriores.map(function (p) { return cartao(p, false); }).join('') : '');
+    }
+
+    function atualizarBarraAcompanhamento() {
+      var ativos = meusPedidosCache.filter(function (p) { return STATUS_ATIVOS_CLIENTE.indexOf(p.status) !== -1; });
+      var badge = document.getElementById('badge-meus-pedidos');
+      badge.textContent = ativos.length;
+      badge.classList.toggle('hidden', ativos.length === 0);
+      var barra = document.getElementById('barra-acompanhamento');
+      var telaAberta = !document.getElementById('modal-meus-pedidos').classList.contains('hidden');
+      if (!ativos.length || telaAberta) { barra.classList.add('hidden'); return; }
+      var p = ativos[0], info = infoStatus(p);
+      document.getElementById('barra-acomp-titulo').textContent = 'Pedido #' + p.id + (ativos.length > 1 ? ' (+' + (ativos.length - 1) + ')' : '');
+      document.getElementById('barra-acomp-status').textContent = info.texto;
+      document.getElementById('barra-acomp-icone').innerHTML = '<i class="fa-solid ' + info.icone + '"></i>';
+      barra.classList.remove('hidden');
+    }
+
+    async function atualizarMeusPedidos(manual) {
+      var lista = lerMeusPedidosLocal();
+      if (!lista.length && !contaToken()) { meusPedidosCache = []; atualizarBarraAcompanhamento(); renderizarMeusPedidos(); return; }
+      var sb = initClient();
+      if (!sb || _buscandoMeus) return;
+      _buscandoMeus = true;
+      var icone = document.getElementById('icone-atualizar-meus');
+      if (manual && icone) icone.classList.add('animate-spin');
+      try {
+        var chamadas = [lista.length ? sb.rpc('meus_pedidos', { p_pedidos: lista.map(function (p) { return { id: p.id, token: p.token }; }) }) : Promise.resolve({ data: [] })];
+        if (contaToken()) chamadas.push(sb.rpc('conta_pedidos', { p_token: contaToken() }));
+        var respostas = await Promise.all(chamadas);
+        if (respostas[0].error) throw respostas[0].error;
+        var porId = {};
+        (respostas[0].data || []).forEach(function (p) { porId[p.id] = p; });
+        if (respostas[1]) {
+          if (respostas[1].error) { if (/SESSAO_EXPIRADA/.test(respostas[1].error.message)) contaSessaoExpirada(); }
+          else (respostas[1].data || []).forEach(function (p) { porId[p.id] = p; });
+        }
+        var dados = Object.keys(porId).map(function (k) { return porId[k]; }).sort(function (a, b) { return b.id - a.id; });
+        // avisa quando o status muda
+        dados.forEach(function (p) {
+          var antes = ultimoStatusVisto[p.id];
+          if (antes && antes !== p.status) {
+            avisoRapido('Pedido #' + p.id + ': ' + infoStatus(p).texto);
+            try { if (navigator.vibrate) navigator.vibrate([200, 100, 200]); } catch (e) {}
+          }
+          ultimoStatusVisto[p.id] = p.status;
+        });
+        // pedido que a loja excluiu: some da lista depois de 2 consultas sem resposta
+        var devolvidos = {};
+        dados.forEach(function (p) { devolvidos[p.id] = true; });
+        var mudouLista = false;
+        lista = lista.filter(function (p) {
+          if (devolvidos[p.id]) { delete _faltandoNoServidor[p.id]; return true; }
+          _faltandoNoServidor[p.id] = (_faltandoNoServidor[p.id] || 0) + 1;
+          if (_faltandoNoServidor[p.id] >= 2 && Date.now() - (p.criado || 0) > 60000) { mudouLista = true; return false; }
+          return true;
+        });
+        if (mudouLista) gravarMeusPedidosLocal(lista);
+        meusPedidosCache = dados;
+      } catch (e) {
+        console.warn('Meus pedidos:', e);
+        if (manual) avisoRapido(/meus_pedidos/.test(String(e.message)) ? 'Acompanhamento em atualização. Tente mais tarde.' : 'Sem conexão. Tentando de novo...');
+      } finally {
+        _buscandoMeus = false;
+        if (icone) icone.classList.remove('animate-spin');
+        atualizarBarraAcompanhamento();
+        if (!document.getElementById('modal-meus-pedidos').classList.contains('hidden')) renderizarMeusPedidos();
+        agendarAcompanhamento();
+      }
+    }
+
+    // Consulta a cada 8 s se há pedido em andamento; senão, a cada 60 s
+    function agendarAcompanhamento(ms) {
+      clearTimeout(_timerAcompanhamento);
+      var ativo = meusPedidosCache.some(function (p) { return STATUS_ATIVOS_CLIENTE.indexOf(p.status) !== -1; });
+      if (!lerMeusPedidosLocal().length && !contaToken()) return;
+      _timerAcompanhamento = setTimeout(function () { if (!document.hidden) atualizarMeusPedidos(); else agendarAcompanhamento(); }, ms || (ativo ? 8000 : 60000));
+    }
+
+    function abrirMeusPedidos() {
+      fecharPainelConta(); // fecha o menu lateral para a tela de pedidos aparecer na frente
+      document.getElementById('modal-checkout').classList.add('hidden');
+      document.getElementById('modal-meus-pedidos').classList.remove('hidden');
+      document.body.style.overflow = 'hidden';
+      renderizarMeusPedidos();
+      atualizarBarraAcompanhamento();
+      atualizarMeusPedidos();
+    }
+    function fecharMeusPedidos() {
+      document.getElementById('modal-meus-pedidos').classList.add('hidden');
+      document.body.style.overflow = '';
+      atualizarBarraAcompanhamento();
+    }
+
+    function pedidoLocal(id) {
+      var loc = lerMeusPedidosLocal().find(function (p) { return p.id === id; });
+      if (loc) return loc;
+      var daConta = meusPedidosCache.find(function (p) { return p.id === id && p.token; });
+      return daConta ? { id: id, token: daConta.token } : null;
+    }
+
+    function pagarPixDoPedido(id) {
+      var loc = pedidoLocal(id), p = meusPedidosCache.find(function (x) { return x.id === id; });
+      if (!loc || !p) return;
+      pedidoAtual = { id: id, token: loc.token, total: Number(p.total), formaPagamento: 'Pix', nome: p.cliente_nome };
+      fecharMeusPedidos();
+      processarPagamentoPix();
+    }
+
+    async function cancelarMeuPedido(id) {
+      var loc = pedidoLocal(id);
+      if (!loc || !confirm('Cancelar o pedido #' + id + '?\n\nSe você já pagou via Pix, não cancele: fale com a loja.')) return;
+      try {
+        var res = await initClient().rpc('cancelar_pedido', { p_id: id, p_token: loc.token });
+        if (res.error) throw res.error;
+        avisoRapido(res.data ? 'Pedido #' + id + ' cancelado.' : 'Não foi possível cancelar: a loja já começou a preparar.');
+      } catch (e) { avisoRapido('Sem conexão. Tente novamente.'); }
+      atualizarMeusPedidos(true);
+    }
+
+    document.addEventListener('visibilitychange', function () { if (!document.hidden && (lerMeusPedidosLocal().length || contaToken())) atualizarMeusPedidos(); });
+
+    /* =================================================================
+     * MINHA CONTA — celular (ou apelido) + PIN de 4 números
+     * ================================================================= */
+    var CHAVE_CONTA = 'loja_conta';
+    var _contaIdentificador = '';
+
+    function lerConta() { try { return JSON.parse(localStorage.getItem(CHAVE_CONTA) || 'null'); } catch (e) { return null; } }
+    function gravarConta(dados) { try { dados ? localStorage.setItem(CHAVE_CONTA, JSON.stringify(dados)) : localStorage.removeItem(CHAVE_CONTA); } catch (e) {} }
+    function contaAtual() { var c = lerConta(); return c && c.token ? c.conta : null; }
+    function contaToken() { var c = lerConta(); return c && c.token ? c.token : null; }
+
+    function formatarCelular(c) {
+      var d = somenteDigitos(c);
+      if (d.length === 11) return '(' + d.slice(0, 2) + ') ' + d.slice(2, 7) + '-' + d.slice(7);
+      if (d.length === 10) return '(' + d.slice(0, 2) + ') ' + d.slice(2, 6) + '-' + d.slice(6);
+      return c || '';
+    }
+
+    var ERROS_CONTA = {
+      CELULAR_JA_CADASTRADO: 'Este celular já tem uma conta. Volte e entre com o seu PIN.',
+      APELIDO_EM_USO: 'Este apelido já é usado por outro cliente. Escolha outro (ou deixe em branco).',
+      APELIDO_INVALIDO: 'Apelido: de 3 a 20 caracteres, só letras minúsculas, números, ponto ou _ (sem espaços).',
+      CELULAR_INVALIDO: 'Informe o celular com DDD. Ex: (16) 99999-9999',
+      NOME_INVALIDO: 'Informe seu nome.',
+      PIN_INVALIDO: 'O PIN deve ter exatamente 4 números.',
+      PIN_INCORRETO: 'PIN incorreto.',
+      CONTA_NAO_ENCONTRADA: 'Não encontramos uma conta com esse apelido. Digite seu celular para entrar ou criar uma conta.',
+      SESSAO_EXPIRADA: 'Sua sessão expirou. Entre de novo.'
+    };
+    function traduzirErroConta(err) {
+      var m = String((err && err.message) || err || '');
+      var b = m.match(/CONTA_BLOQUEADA:?\s*(\d+)?/);
+      if (b) return 'Muitas tentativas erradas. Tente de novo em ' + (b[1] || 15) + ' minutos, ou toque em "Esqueci meu PIN".';
+      for (var k in ERROS_CONTA) if (m.indexOf(k) !== -1) return ERROS_CONTA[k];
+      if (/Failed to fetch|NetworkError/i.test(m)) return 'Sem conexão. Verifique a internet.';
+      if (/conta_|function/i.test(m)) return 'As contas estão em atualização na loja. Tente mais tarde.';
+      return 'Não foi possível concluir. Tente novamente.';
+    }
+    function mostrarErroConta(msg) {
+      var el = document.getElementById('conta-erro');
+      el.textContent = msg || '';
+      el.classList.toggle('hidden', !msg);
+    }
+    function mostrarPassoConta(passo) {
+      ['conta-passo-id', 'conta-passo-pin', 'conta-passo-cadastro'].forEach(function (id) { document.getElementById(id).classList.toggle('hidden', id !== passo); });
+      mostrarErroConta('');
+      var foco = { 'conta-passo-id': 'conta-identificador', 'conta-passo-pin': 'conta-pin', 'conta-passo-cadastro': 'cad-nome' }[passo];
+      setTimeout(function () { var el = document.getElementById(foco); if (el) el.focus(); }, 60);
+    }
+
+    function aplicarContaNaTela() {
+      var c = contaAtual();
+      document.querySelectorAll('.saudacao-topo').forEach(function (el) {
+        el.innerHTML = '';
+        if (c) {
+          el.appendChild(document.createTextNode('Olá, '));
+          var nome = document.createElement('span');
+          nome.style.color = 'var(--destaque)';
+          nome.textContent = (c.nome || '').split(' ')[0];
+          el.appendChild(nome);
+          el.appendChild(document.createTextNode('!'));
+          el.title = 'Abrir minha conta';
+        } else {
+          el.innerHTML = '<span class="text-purple-200 font-semibold">Olá!</span> <u class="text-purple-100">Entre na sua conta</u>';
+          el.title = 'Entrar ou criar conta';
+        }
+      });
+      document.getElementById('conta-deslogado').classList.toggle('hidden', !!c);
+      document.getElementById('conta-logado').classList.toggle('hidden', !c);
+      document.getElementById('conta-titulo').textContent = c ? 'Olá, ' + (c.nome || '').split(' ')[0] + '!' : 'Minha conta';
+      document.getElementById('conta-subtitulo').textContent = c ? formatarCelular(c.celular) + (c.apelido ? ' · @' + c.apelido : '') : 'Entre para salvar seus dados';
+      if (c) {
+        var e = c.endereco || {};
+        document.getElementById('dados-nome').value = c.nome || '';
+        document.getElementById('dados-celular').value = formatarCelular(c.celular);
+        document.getElementById('dados-apelido').value = c.apelido || '';
+        document.getElementById('dados-rua').value = e.rua || '';
+        document.getElementById('dados-numero').value = e.numero || '';
+        document.getElementById('dados-bairro').value = e.bairro || '';
+        document.getElementById('dados-comp').value = e.comp || '';
+        document.getElementById('dados-referencia').value = e.referencia || '';
+      }
+      var atalho = document.getElementById('atalho-entrar-checkout');
+      if (atalho) atalho.classList.toggle('hidden', !!c);
+    }
+
+    function abrirPainelConta() {
+      aplicarContaNaTela();
+      if (!contaAtual()) mostrarPassoConta('conta-passo-id');
+      var ativos = meusPedidosCache.filter(function (p) { return STATUS_ATIVOS_CLIENTE.indexOf(p.status) !== -1; }).length;
+      document.getElementById('conta-resumo-pedidos').textContent = ativos ? ativos + ' pedido(s) em andamento' : 'Acompanhe e veja o histórico do mês';
+      document.getElementById('painel-conta').classList.remove('hidden');
+    }
+    function fecharPainelConta() { document.getElementById('painel-conta').classList.add('hidden'); }
+    function contaVoltarInicio() { mostrarPassoConta('conta-passo-id'); }
+
+    async function contaContinuar(e) {
+      e.preventDefault();
+      var id = document.getElementById('conta-identificador').value.trim();
+      if (!id) { mostrarErroConta('Digite seu celular com DDD ou o seu apelido.'); return; }
+      _contaIdentificador = id;
+      try {
+        var res = await initClient().rpc('conta_verificar', { p_identificador: id });
+        if (res.error) throw res.error;
+        var r = res.data || {};
+        if (r.existe) {
+          document.getElementById('conta-saudacao-pin').textContent = 'Olá, ' + (r.primeiro_nome || 'cliente') + '!';
+          document.getElementById('conta-pin').value = '';
+          mostrarPassoConta('conta-passo-pin');
+        } else if (r.tipo === 'celular') {
+          document.getElementById('cad-celular').value = formatarCelular(id);
+          if (!document.getElementById('cad-nome').value) document.getElementById('cad-nome').value = (localStorage.getItem('loja_cli_nome') || '');
+          mostrarPassoConta('conta-passo-cadastro');
+        } else {
+          mostrarErroConta(ERROS_CONTA.CONTA_NAO_ENCONTRADA);
+        }
+      } catch (err) { mostrarErroConta(traduzirErroConta(err)); }
+    }
+
+    async function contaEntrar(e) {
+      e.preventDefault();
+      var pin = document.getElementById('conta-pin').value.trim();
+      if (!/^\d{4}$/.test(pin)) { mostrarErroConta(ERROS_CONTA.PIN_INVALIDO); return; }
+      try {
+        var res = await initClient().rpc('conta_entrar', { p_identificador: _contaIdentificador, p_pin: pin });
+        if (res.error) throw res.error;
+        var r = res.data || {};
+        if (r.erro) {
+          document.getElementById('conta-pin').value = '';
+          mostrarErroConta(r.erro === 'CONTA_BLOQUEADA' ? traduzirErroConta('CONTA_BLOQUEADA: 15')
+            : 'PIN incorreto.' + (r.tentativas_restantes ? ' Restam ' + r.tentativas_restantes + ' tentativa(s).' : ''));
+          return;
+        }
+        await contaDepoisDeEntrar(r, 'Bem-vindo de volta, ' + (r.conta.nome || '').split(' ')[0] + '!');
+      } catch (err) { mostrarErroConta(traduzirErroConta(err)); }
+    }
+
+    async function contaCriar(e) {
+      e.preventDefault();
+      var pin = document.getElementById('cad-pin').value.trim(), pin2 = document.getElementById('cad-pin2').value.trim();
+      if (!/^\d{4}$/.test(pin)) { mostrarErroConta(ERROS_CONTA.PIN_INVALIDO); return; }
+      if (pin !== pin2) { mostrarErroConta('Os dois PINs não são iguais.'); return; }
+      if (/^(\d)\1{3}$/.test(pin) || pin === '1234' || pin === '4321') { if (!confirm('Esse PIN é muito fácil de adivinhar. Usar mesmo assim?')) return; }
+      var endereco = estadoCheckout.enderecoSalvo || {};
+      try {
+        var res = await initClient().rpc('conta_criar', {
+          p_celular: document.getElementById('cad-celular').value,
+          p_nome: document.getElementById('cad-nome').value,
+          p_pin: pin,
+          p_apelido: document.getElementById('cad-apelido').value.trim() || null,
+          p_endereco: endereco
+        });
+        if (res.error) throw res.error;
+        await contaDepoisDeEntrar(res.data, 'Conta criada! Seus dados ficam salvos para os próximos pedidos.');
+      } catch (err) { mostrarErroConta(traduzirErroConta(err)); }
+    }
+
+    async function contaDepoisDeEntrar(r, mensagem) {
+      gravarConta({ token: r.token, conta: r.conta });
+      ['conta-pin', 'cad-pin', 'cad-pin2'].forEach(function (id) { document.getElementById(id).value = ''; });
+      // pedidos feitos neste aparelho antes de entrar passam a fazer parte da conta
+      var locais = lerMeusPedidosLocal();
+      if (locais.length) {
+        try { await initClient().rpc('conta_vincular_pedidos', { p_token: r.token, p_pedidos: locais.map(function (p) { return { id: p.id, token: p.token }; }) }); } catch (e) {}
+      }
+      // dados da conta passam a preencher o checkout
+      document.getElementById('cliente-nome').value = '';
+      document.getElementById('cliente-telefone').value = '';
+      if (r.conta.endereco && r.conta.endereco.rua) { estadoCheckout.enderecoSalvo = r.conta.endereco; exibirCartaoEnderecoSalvo(); }
+      try { localStorage.setItem('loja_cli_nome', r.conta.nome || ''); localStorage.setItem('loja_cli_tel', formatarCelular(r.conta.celular)); } catch (e) {}
+      aplicarContaNaTela();
+      avisoRapido(mensagem);
+      atualizarMeusPedidos();
+    }
+
+    async function contaSalvarDados(e) {
+      e.preventDefault();
+      var btn = document.getElementById('btn-salvar-dados-conta');
+      btn.disabled = true; btn.textContent = 'Salvando...';
+      try {
+        var endereco = {
+          rua: document.getElementById('dados-rua').value, numero: document.getElementById('dados-numero').value,
+          bairro: document.getElementById('dados-bairro').value, comp: document.getElementById('dados-comp').value,
+          referencia: document.getElementById('dados-referencia').value
+        };
+        var res = await initClient().rpc('conta_salvar_dados', { p_token: contaToken(), p_dados: {
+          nome: document.getElementById('dados-nome').value, celular: document.getElementById('dados-celular').value,
+          apelido: document.getElementById('dados-apelido').value.trim(), endereco: endereco
+        } });
+        if (res.error) throw res.error;
+        gravarConta({ token: contaToken(), conta: res.data });
+        if (res.data.endereco && res.data.endereco.rua) { estadoCheckout.enderecoSalvo = res.data.endereco; exibirCartaoEnderecoSalvo(); }
+        document.getElementById('cliente-nome').value = res.data.nome;
+        document.getElementById('cliente-telefone').value = formatarCelular(res.data.celular);
+        aplicarContaNaTela();
+        document.getElementById('conta-sec-dados').open = false;
+        avisoRapido('✓ Dados salvos!');
+      } catch (err) {
+        if (/SESSAO_EXPIRADA/.test(String(err && err.message))) contaSessaoExpirada();
+        else alert(traduzirErroConta(err));
+      } finally { btn.disabled = false; btn.textContent = 'Salvar meus dados'; }
+    }
+
+    async function contaGuardarEndereco(endereco) {
+      try {
+        var res = await initClient().rpc('conta_salvar_dados', { p_token: contaToken(), p_dados: { endereco: endereco } });
+        if (!res.error) { gravarConta({ token: contaToken(), conta: res.data }); aplicarContaNaTela(); }
+      } catch (e) {}
+    }
+
+    async function contaTrocarPin(e) {
+      e.preventDefault();
+      var atual = document.getElementById('pin-atual').value, novo = document.getElementById('pin-novo').value, novo2 = document.getElementById('pin-novo2').value;
+      if (!/^\d{4}$/.test(novo)) { alert(ERROS_CONTA.PIN_INVALIDO); return; }
+      if (novo !== novo2) { alert('Os dois PINs novos não são iguais.'); return; }
+      try {
+        var res = await initClient().rpc('conta_alterar_pin', { p_token: contaToken(), p_pin_atual: atual, p_pin_novo: novo });
+        if (res.error) throw res.error;
+        ['pin-atual', 'pin-novo', 'pin-novo2'].forEach(function (id) { document.getElementById(id).value = ''; });
+        avisoRapido('✓ PIN alterado. Outros aparelhos foram desconectados.');
+      } catch (err) { alert(traduzirErroConta(err)); }
+    }
+
+    function contaEsqueciPin() {
+      var id = _contaIdentificador || '';
+      window.open('https://wa.me/' + config.whatsapp + '?text=' + encodeURIComponent('Olá! Esqueci o PIN da minha conta no site de pedidos. Meu celular/apelido é: ' + id), '_blank');
+    }
+
+    function limparDadosDoAparelho() {
+      ['loja_cli_nome', 'loja_cli_tel', 'loja_cli_end', CHAVE_MEUS_PEDIDOS, 'loja_pedido_atual'].forEach(function (k) { try { localStorage.removeItem(k); } catch (e) {} });
+      meusPedidosCache = []; ultimoStatusVisto = {};
+      estadoCheckout.enderecoSalvo = null;
+      ['cliente-nome', 'cliente-telefone', 'cliente-obs'].forEach(function (id) { var el = document.getElementById(id); if (el) el.value = ''; });
+      var card = document.getElementById('card-endereco-salvo'); if (card) card.classList.add('hidden');
+      var lbl = document.getElementById('label-btn-endereco'); if (lbl) lbl.innerText = 'Adicionar novo endereço';
+      clearTimeout(_timerAcompanhamento);
+      atualizarBarraAcompanhamento();
+    }
+
+    async function contaSair() {
+      if (!confirm('Sair da sua conta neste aparelho?\n\nSeus dados e pedidos continuam salvos na conta: é só entrar de novo com seu celular e PIN.')) return;
+      var token = contaToken();
+      gravarConta(null);
+      try { if (token) await initClient().rpc('conta_sair', { p_token: token }); } catch (e) {}
+      limparDadosDoAparelho();
+      aplicarContaNaTela();
+      fecharPainelConta();
+      avisoRapido('Você saiu da conta.');
+    }
+
+    function contaSessaoExpirada() {
+      if (!contaToken()) return;
+      gravarConta(null);
+      limparDadosDoAparelho();
+      aplicarContaNaTela();
+      avisoRapido('Sua sessão expirou. Entre de novo em "Minha conta".');
+    }
+
+    // Ao abrir o site: confere a conta salva (sem desconectar se estiver sem internet)
+    async function carregarConta() {
+      aplicarContaNaTela();
+      var token = contaToken();
+      if (!token) return;
+      try {
+        var res = await initClient().rpc('conta_dados', { p_token: token });
+        if (res.error) {
+          if (/SESSAO_EXPIRADA/.test(res.error.message)) contaSessaoExpirada();
+          return;
+        }
+        gravarConta({ token: token, conta: res.data });
+        aplicarContaNaTela();
+      } catch (e) { /* sem internet: mantém a conta salva */ }
+    }
+
+    /* ---------- carregamento do cardápio ---------- */
+    async function carregarCardapio() {
+      var sb = initClient();
+      if (!sb) {
+        document.getElementById('lista-produtos').innerHTML = '<p class="text-center py-8 text-gray-400 text-sm">Sem conexão. Verifique a internet e recarregue a página.</p>';
+        return;
+      }
+      try {
+        var respostas = await Promise.all([
+          sb.from('cardapio').select('*').order('ordem').order('id'),
+          sb.from('adicionais').select('*').eq('ativo', true).order('ordem').order('nome'),
+          sb.from('tipos_pao').select('*').eq('ativo', true).order('ordem').order('nome')
+        ]);
+        tiposPao = (respostas[2] && !respostas[2].error ? respostas[2].data || [] : []).map(function (t) {
+          return { id: String(t.id), nome: t.nome, acrescimo: Math.max(0, parseFloat(t.acrescimo) || 0) };
+        });
+        var resProd = respostas[0], resAd = respostas[1];
+        if (resProd.error) throw resProd.error;
+
+        produtosPorId = {};
+        var todos = (resProd.data || []).map(function (item) {
+          var p = {
+            id: item.id, categoria: (item.categoria || "Lanches").trim(), nome: item.nome, desc: item.descricao || "",
+            preco: parseFloat(item.preco) || 0, imagem: item.imagem_url || "", ativo: item.ativo !== false,
+            ingredientes: Array.isArray(item.ingredientes) ? item.ingredientes : [],
+            perguntaPonto: !!item.pergunta_ponto, aceitaAdicionais: !!item.aceita_adicionais,
+            combo: Array.isArray(item.combo_grupos) ? item.combo_grupos : [],
+            trocaPao: !!item.troca_pao, paoPadraoId: item.pao_padrao_id ? String(item.pao_padrao_id) : ''
+          };
+          produtosPorId[String(p.id)] = p;
+          return p;
+        });
+        produtos = todos;
+        var mapa = {};
+        produtos.forEach(function (p) {
+          if (!p.ativo) return;
+          var k = (p.categoria || "").trim().toLowerCase();
+          if (k && k !== "todos") { if (!mapa[k]) mapa[k] = p.categoria; p.categoria = mapa[k]; }
+        });
+        categorias = ["Todos"].concat(Object.values(mapa));
+        if (categorias.indexOf(categoriaAtiva) === -1) categoriaAtiva = "Todos";
+
+        adicionaisDisponiveis = (resAd.data || []).map(function (a) {
+          return { id: String(a.id), nome: a.nome, preco: parseFloat(a.preco) || 0 };
+        });
+
+        // Remove da sacola itens que esgotaram
+        var antes = carrinho.length;
+        carrinho = carrinho.filter(function (i) {
+          return produtos.some(function (p) { return String(p.id) === String(i.produtoId) && p.ativo; });
+        });
+        if (carrinho.length !== antes) { atualizarBarra(); alert("Algum item da sua sacola esgotou e foi removido."); }
+
+        renderizarCategorias();
+        carregarProdutos();
+      } catch (e) {
+        console.warn("Erro ao carregar cardápio:", e);
+        document.getElementById('lista-produtos').innerHTML = '<p class="text-center py-8 text-gray-400 text-sm">Não foi possível carregar o cardápio. Recarregue a página.</p>';
+      }
+    }
+
+    /* ---------- rodapé Manhub ---------- */
+    function toggleMenuManhub() {
+      var popup = document.getElementById('popup-manhub');
+      if (popup) popup.classList.toggle('hidden');
+    }
+    window.addEventListener('click', function (e) {
+      var popup = document.getElementById('popup-manhub');
+      var logo = document.querySelector('img[alt="Manhub Logo"]');
+      if (popup && logo && !popup.contains(e.target) && !logo.contains(e.target)) popup.classList.add('hidden');
+    });
+
+    /* ---------- início ---------- */
+    document.addEventListener('DOMContentLoaded', function () {
+      atualizarBarra();
+      if (!SUPABASE_URL || !SUPABASE_KEY) {
+        document.getElementById('lista-produtos').innerHTML = '<p class="text-center py-8 text-rose-600 text-sm font-bold">Site ainda não configurado: preencha o arquivo config.js com o endereço e a chave do Supabase.</p>';
+        return;
+      }
+      document.getElementById('lista-produtos').innerHTML = '<p class="text-center py-8 text-gray-400 text-sm">Carregando cardápio...</p>';
+      carregarConfiguracaoLoja();
+      carregarCardapio();
+      carregarConta();
+      atualizarMeusPedidos(); // retoma o acompanhamento dos pedidos deste aparelho e da conta
+      // a configuração (aberta/fechada, entregas) é conferida de novo a cada 2 minutos
+      setInterval(carregarConfiguracaoLoja, 120000);
+      if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.register('sw-cliente.js', { scope: './' }).catch(function () {});
+      }
+    });
+  </script>
+</body>
+</html>
