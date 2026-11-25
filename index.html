@@ -57,6 +57,7 @@
   <link rel="apple-touch-icon" href="icone-192.png">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Cardápio">
 </head>
 <body class="bg-[var(--fundo)] text-gray-800 pb-28 antialiased">
 
@@ -78,11 +79,15 @@
       </div>
       <!-- Saudação no computador (à direita) -->
       <button type="button" onclick="abrirPainelConta()" class="saudacao-topo hidden sm:block ml-auto text-[15px] font-bold text-white truncate max-w-[220px] cursor-pointer"></button>
+      <div class="ml-auto sm:ml-0 flex items-center gap-2 flex-shrink-0">
+      <!-- Instagram da loja (aparece quando a loja preenche em Identidade da loja) -->
+      <a href="#" target="_blank" rel="noopener" class="link-instagram hidden w-12 h-12 bg-white/10 hover:bg-white/20 border border-white/25 text-white rounded-2xl items-center justify-center transition active:scale-95" aria-label="Instagram da loja"><i class="fa-brands fa-instagram text-xl"></i></a>
       <!-- Botão de menu (três traços) -->
-      <button onclick="abrirPainelConta()" class="ml-auto sm:ml-0 relative w-12 h-12 flex-shrink-0 bg-white/10 hover:bg-white/20 border border-white/25 text-white rounded-2xl flex items-center justify-center transition active:scale-95 cursor-pointer" aria-label="Abrir menu">
+      <button onclick="abrirPainelConta()" class="relative w-12 h-12 flex-shrink-0 bg-white/10 hover:bg-white/20 border border-white/25 text-white rounded-2xl flex items-center justify-center transition active:scale-95 cursor-pointer" aria-label="Abrir menu">
         <i class="fa-solid fa-bars text-xl"></i>
         <span id="badge-meus-pedidos" class="hidden absolute -top-1.5 -right-1.5 bg-[var(--destaque)] text-[var(--destaque-texto)] text-[10px] font-black w-5 h-5 rounded-full flex items-center justify-center shadow">0</span>
       </button>
+      </div>
     </div>
   </header>
 
@@ -239,6 +244,11 @@
           <p class="text-[10px] text-gray-400 text-center">Ao sair, seus dados e pedidos continuam salvos na sua conta.</p>
         </div>
       </div>
+      <a href="#" target="_blank" rel="noopener" class="link-instagram hidden m-4 mt-0 bg-white border border-gray-200 rounded-2xl p-3.5 items-center gap-3 shadow-sm">
+        <span class="w-10 h-10 rounded-xl bg-gray-900 text-white flex items-center justify-center"><i class="fa-brands fa-instagram text-lg"></i></span>
+        <span class="flex-1 min-w-0"><span class="block text-sm font-extrabold text-gray-900">Siga no Instagram</span><span class="txt-instagram block text-[11px] text-gray-500 truncate"></span></span>
+        <i class="fa-solid fa-arrow-up-right-from-square text-gray-300 text-xs"></i>
+      </a>
     </aside>
   </div>
 
@@ -816,7 +826,7 @@
         if (c.taxa_entrega !== null && c.taxa_entrega !== undefined) config.taxaEntrega = Number(c.taxa_entrega) || 0;
         config.lojaAberta = c.loja_aberta !== false;
         config.entregasAtivas = c.entregas_ativas !== false;
-        config.modoPix = 'chave_direta';
+        config.modoPix = c.modo_pix === 'mercado_pago' ? 'mercado_pago' : 'chave_direta';
         config.chavePix = c.chave_pix || '';
         config.nomePix = c.nome_recebedor_pix || c.nome_loja || 'LOJA';
         config.cidadePix = c.cidade_pix || 'BRASIL';
@@ -832,14 +842,21 @@
 
     /* nome, logo e cores da loja (painel > Configurações > Identidade da loja) */
     function aplicarMarca(c) {
-      var marca = { nome_loja: c.nome_loja || '', slogan: c.slogan || '', logo_url: c.logo_url || '', cor_primaria: c.cor_primaria || '', cor_destaque: c.cor_destaque || '' };
+      var marca = { nome_loja: c.nome_loja || '', slogan: c.slogan || '', logo_url: c.logo_url || '', cor_primaria: c.cor_primaria || '', cor_destaque: c.cor_destaque || '', instagram: c.instagram || '' };
       try { localStorage.setItem('loja_marca', JSON.stringify(marca)); } catch (e) {}
       mostrarMarca(marca);
     }
     function mostrarMarca(m) {
       aplicarCoresLoja(m.cor_primaria, m.cor_destaque);
       var nome = m.nome_loja || 'Cardápio';
-      document.title = nome + ' - Pedidos';
+      document.title = nome;
+      var metaNome = document.querySelector('meta[name="apple-mobile-web-app-title"]'); if (metaNome) metaNome.setAttribute('content', nome);
+      var insta = String(m.instagram || '').replace(/^@/, '').replace(/^https?:\/\/(www\.)?instagram\.com\//i, '').replace(/[\/?#].*$/, '').trim();
+      document.querySelectorAll('.link-instagram').forEach(function (a) {
+        var ok = !!insta && /^[A-Za-z0-9._]{1,30}$/.test(insta);
+        a.classList.toggle('hidden', !ok); a.classList.toggle('flex', ok);
+        if (ok) { a.href = 'https://instagram.com/' + insta; var t = a.querySelector('.txt-instagram'); if (t) t.textContent = '@' + insta; }
+      });
       var h1 = document.getElementById('nome-loja-topo'); if (h1) h1.textContent = nome;
       var caixa = document.getElementById('caixa-logo-topo'), img = document.getElementById('img-logo-topo');
       if (caixa && img) {
@@ -847,7 +864,7 @@
         else { caixa.classList.add('hidden'); caixa.classList.remove('flex'); }
       }
       var pix = document.getElementById('pay-card-Pix');
-      if (pix) pix.parentElement.classList.toggle('hidden', config.carregada && !config.chavePix);
+      if (pix) pix.parentElement.classList.toggle('hidden', config.carregada && !config.chavePix && config.modoPix !== 'mercado_pago');
     }
     (function () { try { var m = JSON.parse(localStorage.getItem('loja_marca') || 'null'); if (m) document.addEventListener('DOMContentLoaded', function () { mostrarMarca(m); }); } catch (e) {} })();
 
@@ -1027,6 +1044,15 @@
           (obrigatorio ? '<span class="text-[10px] font-black bg-gray-800 text-white px-2 py-0.5 rounded-full">OBRIGATÓRIO</span>' : '') +
         '</div><div class="p-3 space-y-2">' + conteudo + '</div></div>';
     }
+    function blocoRecolhivel(titulo, subtitulo, conteudo) {
+      return '<details id="bloco-adicionais" class="border border-purple-100 rounded-2xl overflow-hidden group">' +
+        '<summary class="flex items-center justify-between gap-3 px-3.5 py-3 bg-purple-50/70 cursor-pointer list-none [&::-webkit-details-marker]:hidden select-none">' +
+          '<div class="min-w-0"><p class="text-xs font-black text-[var(--cor)] uppercase tracking-wide">' + esc(titulo) + '</p>' +
+          '<p class="text-[11px] text-gray-500 truncate"><span id="sub-adicionais">' + esc(subtitulo) + '</span><span id="contador-adicionais" class="hidden font-bold text-[var(--cor-escura)]"></span></p></div>' +
+          '<span class="flex items-center gap-1.5 text-[11px] font-bold text-gray-600 whitespace-nowrap"><span class="group-open:hidden">Ver opções</span><span class="hidden group-open:inline">Fechar</span>' +
+          '<i class="fa-solid fa-chevron-down text-[10px] transition-transform group-open:rotate-180"></i></span>' +
+        '</summary><div class="p-3 space-y-2 border-t border-purple-100">' + conteudo + '</div></details>';
+    }
     function linhaOpcao(tipo, nome, valor, rotulo, extra, marcado) {
       return '<label class="flex items-center justify-between gap-3 p-2.5 rounded-xl border border-gray-200 hover:border-purple-300 bg-white cursor-pointer text-sm has-[:checked]:border-[var(--cor)] has-[:checked]:bg-purple-50/60">' +
         '<span class="flex items-center gap-2.5"><input type="' + tipo + '" name="' + esc(nome) + '" value="' + esc(valor) + '"' + (marcado ? ' checked' : '') + ' onchange="atualizarTotalModal()" class="w-4 h-4 accent-[var(--cor)]">' +
@@ -1067,9 +1093,9 @@
           }).join('') + '</div>', false);
       }
       if (prod.aceitaAdicionais && adicionaisDisponiveis.length) {
-        html += blocoOpcoes('Adicionais', 'Turbine seu lanche', adicionaisDisponiveis.map(function (a) {
+        html += blocoRecolhivel('Adicionais', adicionaisDisponiveis.length + ' opções · toque para ver', adicionaisDisponiveis.map(function (a) {
           return linhaOpcao('checkbox', 'adicional', a.id, a.nome, '+ ' + brl(a.preco), false);
-        }).join(''), false);
+        }).join(''));
       }
       var box = document.getElementById('modal-opcoes');
       box.innerHTML = html;
@@ -1106,7 +1132,16 @@
 
     function atualizarTotalModal() {
       if (!produtoEmEdicao) return;
-      document.getElementById('modal-prod-total').innerText = brl(lerOpcoesModal().preco);
+      var op = lerOpcoesModal();
+      document.getElementById('modal-prod-total').innerText = brl(op.preco);
+      var cont = document.getElementById('contador-adicionais');
+      if (cont) {
+        var soma = op.adicionais.reduce(function (t, a) { return t + a.preco; }, 0);
+        var n = op.adicionais.length;
+        cont.textContent = n ? n + (n > 1 ? ' escolhidos' : ' escolhido') + ' · + ' + brl(soma) : '';
+        cont.classList.toggle('hidden', !n);
+        document.getElementById('sub-adicionais').classList.toggle('hidden', !!n);
+      }
     }
 
     function fecharModalProduto() {
@@ -1661,15 +1696,16 @@
     /* ---------- Pix ---------- */
     var intervaloTimerPix = null;
 
-    function iniciarCronometroPix() {
+    function iniciarCronometroPix(segundos) {
       if (intervaloTimerPix) clearInterval(intervaloTimerPix);
-      var restantes = 30 * 60, total = restantes;
-      document.getElementById("pixTimerTexto").innerText = "30 : 00";
+      var restantes = Math.max(60, Math.min(30 * 60, segundos || 30 * 60)), total = 30 * 60;
+      document.getElementById("pixTimerTexto").innerText = String(Math.floor(restantes / 60)).padStart(2, '0') + " : " + String(restantes % 60).padStart(2, '0');
       document.getElementById("pixTimerBarra").style.width = "100%";
       intervaloTimerPix = setInterval(function () {
         restantes--;
         if (restantes <= 0) {
           clearInterval(intervaloTimerPix);
+          if (config.modoPix === 'mercado_pago') { processarPagamentoPix(); return; } // código venceu: gera outro
           document.getElementById("pixTimerTexto").innerText = "00 : 00";
           document.getElementById("pixTimerBarra").style.width = "0%";
           document.getElementById("pixAvisoExtra").innerText = "O tempo acabou. Se você já pagou, aguarde a confirmação nesta tela. Se não pagou, toque na seta para cancelar o pedido.";
@@ -1736,14 +1772,24 @@
       var img = document.getElementById("pixQrImg");
 
       try {
-        var codigo, qrSrc = '';
-        if (!config.chavePix) throw new Error("a loja ainda não cadastrou a chave Pix");
-        codigo = gerarPixCopiaECola(pedidoAtual.total, pedidoAtual.id);
+        var codigo, qrSrc = '', segundos = 30 * 60;
+        var automatico = config.modoPix === 'mercado_pago';
+        if (automatico) {
+          var mp = await chamarPixMercadoPago('gerar');
+          if (!mp || !mp.copia_cola) throw new Error((mp && mp.erro) || "o Mercado Pago não respondeu");
+          codigo = mp.copia_cola;
+          if (mp.expira_em) segundos = Math.round((new Date(mp.expira_em).getTime() - Date.now()) / 1000);
+        } else {
+          if (!config.chavePix) throw new Error("a loja ainda não cadastrou a chave Pix");
+          codigo = gerarPixCopiaECola(pedidoAtual.total, pedidoAtual.id);
+        }
         if (await carregarBibliotecaQr()) {
           var qr = window.qrcode(0, 'M'); qr.addData(codigo); qr.make();
           qrSrc = qr.createDataURL(6, 2);
         }
-        document.getElementById("pixAvisoExtra").innerText = "Depois de pagar, aguarde nesta tela: a loja confirma o recebimento e seu pedido segue para a cozinha.";
+        document.getElementById("pixAvisoExtra").innerText = automatico
+          ? "Depois de pagar, fique nesta tela: o pagamento é confirmado sozinho em poucos segundos e o pedido segue para a cozinha."
+          : "Depois de pagar, aguarde nesta tela: a loja confirma o recebimento e seu pedido segue para a cozinha.";
         document.getElementById("pixAvisoExtra").style.display = "block";
         img.src = qrSrc;
         img.style.display = qrSrc ? 'block' : 'none';
@@ -1751,7 +1797,7 @@
         document.getElementById("pixCodigoBox").innerText = codigo;
         carregando.style.display = "none";
         conteudo.style.display = "flex";
-        iniciarCronometroPix();
+        iniciarCronometroPix(segundos);
         escutarConfirmacaoPix();
       } catch (err) {
         alert("Não foi possível gerar a cobrança Pix: " + err.message + "\n\nO pedido #" + pedidoAtual.id + " foi registrado. Fale com a loja pelo WhatsApp.");
@@ -1761,9 +1807,11 @@
 
     function escutarConfirmacaoPix() {
       if (window.intervaloPix) clearInterval(window.intervaloPix);
-      var semRespostaPix = 0;
+      var semRespostaPix = 0, voltas = 0;
       window.intervaloPix = setInterval(async function () {
         try {
+          // Mercado Pago: a cada ~7 s confere direto no banco do Mercado Pago (caso o aviso automático demore)
+          if (config.modoPix === 'mercado_pago' && (++voltas % 3 === 0)) chamarPixMercadoPago('consultar').catch(function () {});
           var status = await consultarStatusPedido();
           if (!status) {
             if (++semRespostaPix >= 2) {
@@ -1787,6 +1835,16 @@
           }
         } catch (e) { console.warn("Aguardando confirmação...", e); }
       }, 2500);
+    }
+
+    async function chamarPixMercadoPago(acao) {
+      var r = await fetch(CONFIG_SUPABASE.url.replace(/\/+$/, '') + '/functions/v1/pix-mercado-pago', {
+        method: 'POST', headers: { 'Content-Type': 'application/json', apikey: CONFIG_SUPABASE.chave },
+        body: JSON.stringify({ acao: acao, pedido_id: pedidoAtual.id, token: pedidoAtual.token })
+      });
+      var j = null; try { j = await r.json(); } catch (e) {}
+      if (!r.ok && !(j && j.erro)) return { erro: 'serviço de Pix indisponível (' + r.status + ')' };
+      return j;
     }
 
     function pararPix() {

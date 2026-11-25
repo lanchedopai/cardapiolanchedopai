@@ -1,14 +1,28 @@
 {
-  "name": "Pedidos",
-  "short_name": "Pedidos",
+  "id": "./",
+  "name": "Lanche do Pai",
+  "short_name": "Lanche do Pai",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
-  "background_color": "#ffffff",
-  "theme_color": "#B91C1C",
+  "background_color": "#000000",
+  "theme_color": "#000000",
   "icons": [
-    { "src": "icone-192.png", "sizes": "192x192", "type": "image/png" },
-    { "src": "icone-512.png", "sizes": "512x512", "type": "image/png" },
-    { "src": "icone-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+    {
+      "src": "icone-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "icone-512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    },
+    {
+      "src": "icone-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
   ]
 }
