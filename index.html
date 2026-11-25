@@ -86,6 +86,32 @@
     </div>
   </header>
 
+  <!-- Faixa da mesa (quando o cliente abre pelo QR Code da mesa) -->
+  <div id="faixa-mesa" class="hidden bg-[var(--destaque)] text-[var(--destaque-texto)]">
+    <div class="max-w-xl mx-auto px-4 py-2.5 flex items-center gap-2">
+      <i class="fa-solid fa-utensils"></i>
+      <p class="flex-1 text-sm font-black leading-tight">Mesa <span id="faixa-mesa-num"></span><span class="block text-[11px] font-bold opacity-80">Seu pedido vai direto para a cozinha</span></p>
+      <button onclick="chamarNaMesa('garcom')" class="bg-black/10 hover:bg-black/20 text-xs font-black px-2.5 py-2 rounded-xl"><i class="fa-solid fa-bell"></i> Garçom</button>
+      <button onclick="chamarNaMesa('conta')" class="bg-black/10 hover:bg-black/20 text-xs font-black px-2.5 py-2 rounded-xl"><i class="fa-solid fa-receipt"></i> Conta</button>
+    </div>
+  </div>
+
+  <!-- MODAL: enviar pedido da mesa -->
+  <div id="modal-mesa" class="fixed inset-0 bg-black/60 hidden z-50 flex items-end sm:items-center justify-center p-0 sm:p-4">
+    <div class="bg-white w-full max-w-lg rounded-t-2xl sm:rounded-2xl max-h-[90vh] overflow-y-auto p-5 space-y-4">
+      <div class="flex justify-between items-center border-b pb-3">
+        <h2 class="text-lg font-black text-[var(--cor)]">Pedido da mesa <span id="modal-mesa-num"></span></h2>
+        <button onclick="document.getElementById('modal-mesa').classList.add('hidden')" class="text-gray-400 text-2xl font-bold leading-none" aria-label="Fechar">&times;</button>
+      </div>
+      <div id="mesa-itens" class="divide-y divide-gray-100"></div>
+      <div class="flex justify-between text-base font-black"><span>Total</span><span id="mesa-total"></span></div>
+      <input type="text" id="mesa-nome" maxlength="40" placeholder="Seu nome (opcional)" class="w-full border border-gray-300 rounded-xl p-3 text-sm">
+      <input type="text" id="mesa-obs" maxlength="300" placeholder="Observação para a cozinha (opcional)" class="w-full border border-gray-300 rounded-xl p-3 text-sm">
+      <p class="text-[11px] text-gray-500">O pagamento é feito na mesa, quando você pedir a conta.</p>
+      <button id="btn-enviar-mesa" onclick="enviarPedidoMesa()" class="w-full bg-[var(--cor)] text-white font-extrabold py-3.5 rounded-2xl shadow-lg">Enviar pedido para a cozinha</button>
+    </div>
+  </div>
+
   <!-- Filtro de Categorias -->
   <nav class="max-w-xl mx-auto px-4 pt-4 pb-2 sticky top-[80px] bg-[var(--fundo)]/95 backdrop-blur-sm z-20">
     <div class="flex gap-2 overflow-x-auto hide-scrollbar py-1" id="lista-categorias"></div>
@@ -1182,8 +1208,66 @@
     }
 
     /* ---------- checkout ---------- */
+    /* ---------- modo mesa (QR Code) ---------- */
+    var modoMesa = null;
+    async function verificarModoMesa() {
+      var q = new URLSearchParams(location.search), mesa = parseInt(q.get('mesa'), 10), cod = q.get('c');
+      if (!mesa || !cod) { try { var g = JSON.parse(sessionStorage.getItem('loja_mesa') || 'null'); if (g) { mesa = g.mesa; cod = g.codigo; } } catch (e) {} }
+      if (!mesa || !cod) return;
+      var sb = initClient(); if (!sb) return;
+      var r = await sb.rpc('mesa_qr_info', { p_mesa: mesa, p_codigo: cod });
+      if (r.error || !r.data || !r.data.valido) { try { sessionStorage.removeItem('loja_mesa'); } catch (e) {} if (q.get('mesa')) avisoRapido('Pedidos pela mesa indisponíveis agora. Chame o garçom.'); return; }
+      modoMesa = { mesa: mesa, codigo: cod };
+      try { sessionStorage.setItem('loja_mesa', JSON.stringify(modoMesa)); } catch (e) {}
+      document.getElementById('faixa-mesa-num').textContent = mesa;
+      document.getElementById('faixa-mesa').classList.remove('hidden');
+      document.getElementById('btn-sacola-texto').firstChild.textContent = 'Ver pedido (';
+    }
+    async function chamarNaMesa(tipo) {
+      if (!modoMesa) return;
+      var r = await initClient().rpc('mesa_qr_chamar', { p_mesa: modoMesa.mesa, p_codigo: modoMesa.codigo, p_tipo: tipo });
+      avisoRapido(r.error ? 'Não foi possível chamar agora. Tente de novo.' : (tipo === 'conta' ? '✓ Pedimos a sua conta. O garçom já vem!' : '✓ O garçom foi chamado!'));
+    }
+    function abrirModalMesa() {
+      var t = calcularTotais();
+      document.getElementById('modal-mesa-num').textContent = modoMesa.mesa;
+      document.getElementById('mesa-itens').innerHTML = carrinho.map(function (i) {
+        return '<div class="py-2 flex justify-between gap-3"><div><p class="text-sm font-bold">' + i.qtd + 'x ' + esc(i.nome) + '</p>' + detalhesItem(i).map(function (l) { return '<p class="text-[11px] text-gray-500">' + esc(l) + '</p>'; }).join('') + '</div><span class="text-sm font-bold">' + brl(i.precoTotal * i.qtd) + '</span></div>';
+      }).join('');
+      document.getElementById('mesa-total').textContent = brl(t.subtotal);
+      try { document.getElementById('mesa-nome').value = localStorage.getItem('loja_cli_nome') || ''; } catch (e) {}
+      document.getElementById('modal-mesa').classList.remove('hidden');
+    }
+    async function enviarPedidoMesa() {
+      var btn = document.getElementById('btn-enviar-mesa');
+      if (btn.disabled || !carrinho.length) return;
+      btn.disabled = true; btn.textContent = 'Enviando...';
+      var nome = document.getElementById('mesa-nome').value.trim();
+      var r = await initClient().rpc('mesa_qr_pedido', { p_mesa: modoMesa.mesa, p_codigo: modoMesa.codigo, p_nome: nome || null,
+        p_obs: document.getElementById('mesa-obs').value.trim() || null,
+        p_itens: carrinho.map(function (item) {
+          return { id: item.produtoId, quantidade: item.qtd, adicionais: item.adicionais.map(function (a) { return a.id; }), sem: item.sem, ponto: item.ponto,
+                   escolhas: item.escolhas.map(function (e) { return e.produto_id; }), pao: item.pao ? item.pao.id : null, observacao: item.obs || '' };
+        }) });
+      btn.disabled = false; btn.textContent = 'Enviar pedido para a cozinha';
+      if (r.error) {
+        var m = r.error.message || '';
+        alert(/MESAS_DESATIVADAS|QR_INVALIDO/.test(m) ? 'Os pedidos pela mesa estão desligados agora. Chame o garçom.'
+          : /LOJA_FECHADA/.test(m) ? 'A loja está fechada no momento.' : /MUITOS_PEDIDOS/.test(m) ? 'Já há pedidos desta mesa aguardando a cozinha. Aguarde um instante.'
+          : traduzirErroPedido(m));
+        return;
+      }
+      if (nome) { try { localStorage.setItem('loja_cli_nome', nome); } catch (e) {} }
+      document.getElementById('modal-mesa').classList.add('hidden');
+      pedidoAtual = { id: r.data.id, token: r.data.token, total: Number(r.data.total), formaPagamento: 'Mesa', nome: nome };
+      try { localStorage.setItem('loja_pedido_atual', JSON.stringify({ id: r.data.id, token: r.data.token, quando: Date.now() })); } catch (e) {}
+      salvarMeuPedido(r.data.id, r.data.token);
+      iniciarEsperaAceiteLoja();
+    }
+
     function abrirModalCheckout() {
       if (lojaFechadaAviso()) return;
+      if (modoMesa) { abrirModalMesa(); return; }
       carregarDadosSalvosCliente();
       renderizarItensSacola();
       irParaEtapaCheckout(0);
@@ -2331,6 +2415,7 @@
       document.getElementById('lista-produtos').innerHTML = '<p class="text-center py-8 text-gray-400 text-sm">Carregando cardápio...</p>';
       carregarConfiguracaoLoja();
       carregarCardapio();
+      verificarModoMesa();
       carregarConta();
       atualizarMeusPedidos(); // retoma o acompanhamento dos pedidos deste aparelho e da conta
       // a configuração (aberta/fechada, entregas) é conferida de novo a cada 2 minutos
